@@ -10,7 +10,18 @@ const { v4: uuidv4 } = require('uuid');
  */
 exports.createEvent = async (req, res) => {
   try {
-    const { name, description, startDate, endDate, location } = req.body;
+    const { name, description, startDate, endDate, location, source, destination } = req.body;
+    
+    console.log('Creating event with data:', {
+      name,
+      description: description?.substring(0, 50) + (description?.length > 50 ? '...' : ''),
+      startDate,
+      endDate,
+      location,
+      source,
+      destination,
+      user: req.user.id
+    });
     
     // Create event
     const newEvent = {
@@ -18,6 +29,8 @@ exports.createEvent = async (req, res) => {
       name,
       description,
       location,
+      source,
+      destination,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
       ownerId: req.user.id,
@@ -26,6 +39,7 @@ exports.createEvent = async (req, res) => {
     };
     
     await db.insert(events).values(newEvent);
+    console.log('Event created successfully with ID:', newEvent.id);
 
     return res.status(201).json({
       success: true,
@@ -154,7 +168,7 @@ exports.getEventById = async (req, res) => {
 exports.updateEvent = async (req, res) => {
   try {
     const eventId = req.params.id;
-    const { name, description, startDate, endDate, location } = req.body;
+    const { name, description, startDate, endDate, location, source, destination } = req.body;
 
     // Find event
     const eventResults = await db.select()
@@ -186,6 +200,8 @@ exports.updateEvent = async (req, res) => {
         startDate: startDate ? new Date(startDate) : event.startDate,
         endDate: endDate ? new Date(endDate) : event.endDate,
         location: location || event.location,
+        source: source || event.source,
+        destination: destination || event.destination,
         updatedAt: new Date()
       })
       .where(eq(events.id, eventId));

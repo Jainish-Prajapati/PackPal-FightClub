@@ -25,6 +25,8 @@ const events = pgTable('events', {
   name: varchar('name').notNull(),
   description: text('description'),
   location: varchar('location'),
+  source: varchar('source'),
+  destination: varchar('destination'),
   startDate: timestamp('start_date'),
   endDate: timestamp('end_date'),
   ownerId: uuid('owner_id').references(() => users.id),

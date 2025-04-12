@@ -66,12 +66,22 @@ const CreateEvent = () => {
         
         console.log("Event creation response:", response.data);
         
-        if (response.data.success) {
-          console.log("Event created successfully, navigating to event page");
-          navigate(`/events/${response.data.event.id}`);
-        } else {
-          setError(response.data.message || 'Failed to create event');
+        // Check if we received a valid response with event data
+        if (response && response.data) {
+          if (response.data.success && response.data.event && response.data.event.id) {
+            console.log("Event created successfully, navigating to event page");
+            navigate(`/events/${response.data.event.id}`);
+            return;
+          } else if (response.data.id) {
+            // Some APIs might return the event directly
+            console.log("Event created successfully (direct response), navigating to event page");
+            navigate(`/events/${response.data.id}`);
+            return;
+          }
         }
+        
+        // If we get here, something went wrong but the request didn't fail
+        setError('Failed to create event. The response format was unexpected.');
       } catch (err) {
         console.error('Error creating event:', err);
         setError(err.response?.data?.message || 'Failed to create event. Please try again.');

@@ -71,11 +71,38 @@ const EventDetails = () => {
         }
         
         if (eventData && eventData.id) {
+          // Ensure source and destination are populated if available
+          if (!eventData.source && !eventData.destination && eventData.location) {
+            // Try to extract source and destination from location if in "Source to Destination" format
+            const locationParts = eventData.location.split(' to ');
+            if (locationParts.length === 2) {
+              eventData.source = locationParts[0];
+              eventData.destination = locationParts[1];
+            }
+          }
+          
           setEvent(eventData);
           
           // Handle items if available
           if (eventData.items && Array.isArray(eventData.items)) {
+            console.log('Setting real items:', eventData.items.length, 'items found');
             setItems(eventData.items);
+          } else {
+            // If we have a valid event but no items, fetch items separately
+            console.log('No items in event data, trying to fetch items separately');
+            try {
+              const itemsResponse = await itemService.getEventItems(eventId);
+              if (itemsResponse && itemsResponse.data && itemsResponse.data.items) {
+                console.log('Fetched items separately:', itemsResponse.data.items.length, 'items found');
+                setItems(itemsResponse.data.items);
+              } else {
+                console.log('No items found for event, initializing with empty array');
+                setItems([]);
+              }
+            } catch (itemsErr) {
+              console.error('Error fetching items separately:', itemsErr);
+              setItems([]);
+            }
           }
           
           setIsUsingMockData(false);
@@ -96,6 +123,8 @@ const EventDetails = () => {
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         location: "Mock Location",
+        source: "Mock Source City",
+        destination: "Mock Destination City",
         description: "This is a mock event created because we couldn't load the real data.",
         ownerId: currentUser?.id || "unknown"
       };
@@ -365,12 +394,13 @@ const EventDetails = () => {
   // Edit event button handler
   const handleEditEvent = () => {
     setEditedEvent({
-      id: event.id,
       name: event.name || '',
+      description: event.description || '',
       startDate: event.startDate ? new Date(event.startDate).toISOString().split('T')[0] : '',
       endDate: event.endDate ? new Date(event.endDate).toISOString().split('T')[0] : '',
       location: event.location || '',
-      description: event.description || ''
+      source: event.source || '',
+      destination: event.destination || ''
     });
     setShowEditEventModal(true);
   };
@@ -378,40 +408,49 @@ const EventDetails = () => {
   // Save edited event
   const saveEditedEvent = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     
     try {
-      const eventData = {
-        name: editedEvent.name,
-        startDate: editedEvent.startDate,
-        endDate: editedEvent.endDate,
-        location: editedEvent.location,
-        description: editedEvent.description
-      };
-      
-      // In mock mode, update locally
+      // In mock mode, just update locally
       if (isUsingMockData) {
-        setEvent({...event, ...eventData});
+        setEvent({
+          ...event,
+          name: editedEvent.name,
+          description: editedEvent.description,
+          startDate: editedEvent.startDate,
+          endDate: editedEvent.endDate,
+          location: editedEvent.location,
+          source: editedEvent.source,
+          destination: editedEvent.destination
+        });
         setShowEditEventModal(false);
-        setEditedEvent(null);
         return;
       }
       
       // With real API
-      const response = await eventService.updateEvent(eventId, eventData);
+      const response = await eventService.updateEvent(eventId, {
+        name: editedEvent.name,
+        description: editedEvent.description,
+        startDate: editedEvent.startDate,
+        endDate: editedEvent.endDate,
+        location: editedEvent.location,
+        source: editedEvent.source,
+        destination: editedEvent.destination
+      });
       
       if (response.data && response.data.success) {
-        // Refresh the event details 
+        // Refresh event details
         fetchEventDetails();
       } else {
         throw new Error(response.data?.message || 'Failed to update event');
       }
       
-      // Reset and close modal
       setShowEditEventModal(false);
-      setEditedEvent(null);
     } catch (err) {
       console.error('Error updating event:', err);
       alert('Failed to update event. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
   
@@ -501,19 +540,27 @@ const EventDetails = () => {
         </div>
       )}
       
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">{event.name || 'Unnamed Event'}</h1>
-          <p className="text-gray-500">
-            {formatDate(event.startDate)} - {formatDate(event.endDate)}
-            {event.location && ` • ${event.location}`}
-          </p>
-          {event.description && (
-            <p className="mt-2 text-gray-700">{event.description}</p>
-          )}
-        </div>
-        
-        {isEditable() && (
+      {/* Event header with name, dates, and location */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold">{event.name || 'Unnamed Event'}</h1>
+            <div className="text-gray-500 mb-2">
+              {formatDate(event.startDate)} - {formatDate(event.endDate)}
+              {event.location && ` • ${event.location}`}
+            </div>
+            
+            {/* Add source and destination display */}
+            {(event.source || event.destination) && (
+              <div className="text-gray-600 mb-2 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+                <span className="font-medium">Travel Route:</span> {event.source || 'N/A'} → {event.destination || 'N/A'}
+              </div>
+            )}
+          </div>
+          
           <div className="mt-4 md:mt-0 flex space-x-3">
             <button
               onClick={() => setShowInviteModal(true)}
@@ -521,12 +568,20 @@ const EventDetails = () => {
             >
               Invite Members
             </button>
-            <button
-              onClick={handleEditEvent}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-            >
-              Edit Event
-            </button>
+            {isEditable() && (
+              <button 
+                onClick={handleEditEvent} 
+                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+              >
+                Edit Event
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {event.description && (
+          <div className="bg-gray-50 p-3 rounded-md mt-2">
+            <p className="text-gray-700">{event.description}</p>
           </div>
         )}
       </div>
@@ -961,6 +1016,32 @@ const EventDetails = () => {
                       onChange={(e) => setEditedEvent({...editedEvent, location: e.target.value})}
                       className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="event-source" className="block text-sm font-medium text-gray-700">Source City</label>
+                      <input
+                        type="text"
+                        id="event-source"
+                        value={editedEvent.source}
+                        onChange={(e) => setEditedEvent({...editedEvent, source: e.target.value})}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="Enter source city"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="event-destination" className="block text-sm font-medium text-gray-700">Destination City</label>
+                      <input
+                        type="text"
+                        id="event-destination"
+                        value={editedEvent.destination}
+                        onChange={(e) => setEditedEvent({...editedEvent, destination: e.target.value})}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="Enter destination city"
+                      />
+                    </div>
                   </div>
                   
                   <div>

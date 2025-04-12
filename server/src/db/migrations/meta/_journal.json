@@ -15,6 +15,20 @@
       "when": 1744406876593,
       "tag": "0001_living_madripoor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1744500000000,
+      "tag": "0003_add_source_destination",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1744600000000,
+      "tag": "0004_add_status_to_items",
+      "breakpoints": true
     }
   ]
 }

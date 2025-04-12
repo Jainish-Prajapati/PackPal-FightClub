@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
  */
 exports.createItem = async (req, res) => {
   try {
-    const { name, description, quantity, eventId, isPacked, isShared, priority } = req.body;
+    const { name, description, quantity, eventId, isPacked, isShared, priority, status, categoryId, assignedToId } = req.body;
     
     if (!name || !eventId) {
       return res.status(400).json({
@@ -50,13 +50,16 @@ exports.createItem = async (req, res) => {
       isPacked: isPacked || false,
       isShared: isShared || false,
       priority: priority || 'medium',
+      status: status || 'not_started',
+      categoryId: categoryId || null,
       eventId,
-      assignedToId: req.user.id,
+      assignedToId: assignedToId || req.user.id,
       createdById: req.user.id,
       createdAt: new Date(),
       updatedAt: new Date()
     };
     
+    console.log('Creating new item:', newItem);
     await db.insert(items).values(newItem);
     
     return res.status(201).json({
@@ -82,6 +85,8 @@ exports.createItem = async (req, res) => {
 exports.getEventItems = async (req, res) => {
   try {
     const { eventId } = req.params;
+    
+    console.log(`Getting items for event ${eventId}`);
     
     // Check if event exists and user has access to it
     const eventResults = await db.select()
@@ -109,6 +114,8 @@ exports.getEventItems = async (req, res) => {
     const eventItems = await db.select()
       .from(items)
       .where(eq(items.eventId, eventId));
+    
+    console.log(`Found ${eventItems.length} items for event ${eventId}`);
     
     return res.status(200).json({
       success: true,
@@ -191,7 +198,9 @@ exports.getItemById = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, quantity, isPacked, isShared, priority, assignedToId } = req.body;
+    const { name, description, quantity, isPacked, isShared, priority, assignedToId, status, categoryId } = req.body;
+    
+    console.log(`Updating item ${id} with data:`, req.body);
     
     // Get item
     const itemResults = await db.select()
@@ -238,6 +247,8 @@ exports.updateItem = async (req, res) => {
         isPacked: isPacked !== undefined ? isPacked : item.isPacked,
         isShared: isShared !== undefined ? isShared : item.isShared,
         priority: priority || item.priority,
+        status: status || item.status,
+        categoryId: categoryId || item.categoryId,
         assignedToId: assignedToId || item.assignedToId,
         updatedAt: new Date()
       })
@@ -339,18 +350,11 @@ exports.updateItemStatus = async (req, res) => {
     if (!status) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide a status'
+        message: 'Please provide status'
       });
     }
     
-    // Valid statuses
-    const validStatuses = ['not_started', 'in_progress', 'packed', 'delivered'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid status. Must be one of: not_started, in_progress, packed, delivered'
-      });
-    }
+    console.log(`Updating item ${id} status to ${status}`);
     
     // Get item
     const itemResults = await db.select()
@@ -380,22 +384,20 @@ exports.updateItemStatus = async (req, res) => {
     
     const event = eventResults[0];
     
-    // Check if user owns the event or is assigned to this item
-    if (event.ownerId !== req.user.id && item.assignedToId !== req.user.id) {
+    // Check if user owns the event
+    if (event.ownerId !== req.user.id) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to update this item status'
+        message: 'You do not have permission to update this item'
       });
     }
     
-    // Update isPacked based on status
-    const isPacked = status === 'packed' || status === 'delivered';
-    
-    // Update item
+    // Update item status
     await db.update(items)
       .set({
-        status: status,
-        isPacked: isPacked,
+        status,
+        // Update isPacked to true if status is 'packed' or 'delivered'
+        isPacked: ['packed', 'delivered'].includes(status),
         updatedAt: new Date()
       })
       .where(eq(items.id, id));
