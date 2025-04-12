@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { eventService } from '../services/api.js';
 
@@ -8,22 +8,28 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const { currentUser } = useAuth();
+  const location = useLocation();
 
   console.log("Dashboard rendering, currentUser:", currentUser);
 
   useEffect(() => {
-    console.log("Dashboard mounted");
+    console.log("Dashboard mounted or location changed");
     
     const fetchEvents = async () => {
       try {
+        setIsLoading(true);
         console.log("Fetching events...");
         const response = await eventService.getAllEvents();
         
         console.log("Events response:", response.data);
         
         if (response.data.success) {
-          setEvents(response.data.events);
-          console.log("Events loaded successfully:", response.data.events.length, "events");
+          // Filter out any ended events just to be sure
+          const activeEvents = response.data.events.filter(
+            event => event.status !== 'ended'
+          );
+          setEvents(activeEvents);
+          console.log("Events loaded successfully:", activeEvents.length, "active events");
         } else {
           console.error("Events API returned error:", response.data.message);
           setError(response.data.message || 'Failed to load events');
@@ -39,7 +45,7 @@ const Dashboard = () => {
     fetchEvents();
     
     return () => console.log("Dashboard unmounted");
-  }, []);
+  }, [location.pathname]); // Re-fetch when location changes
 
   if (isLoading) {
     return (
@@ -52,7 +58,7 @@ const Dashboard = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">My Travel Events</h1>
+        <h1 className="text-2xl font-bold">Active Travel Events</h1>
         {['owner', 'admin'].includes(currentUser?.role) && (
           <Link 
             to="/events/create" 
@@ -71,11 +77,11 @@ const Dashboard = () => {
 
       {events.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow">
-          <h2 className="text-xl font-medium text-gray-900 mb-2">No events yet</h2>
+          <h2 className="text-xl font-medium text-gray-900 mb-2">No active events</h2>
           <p className="text-gray-500 mb-6">
             {['owner', 'admin'].includes(currentUser?.role) 
               ? "Create your first event to get started!" 
-              : "You haven't been invited to any events yet."}
+              : "You haven't been invited to any active events yet."}
           </p>
           {['owner', 'admin'].includes(currentUser?.role) && (
             <Link 
@@ -95,7 +101,14 @@ const Dashboard = () => {
               className="block bg-white rounded-lg shadow overflow-hidden hover:shadow-md transition-shadow"
             >
               <div className="p-5">
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">{event.name}</h3>
+                <div className="flex items-center">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">{event.name}</h3>
+                  {event.status === 'planning' && (
+                    <span className="ml-2 px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
+                      Planning
+                    </span>
+                  )}
+                </div>
                 <p className="text-gray-500 text-sm mb-3">
                   {new Date(event.startDate).toLocaleDateString()} - {new Date(event.endDate).toLocaleDateString()}
                 </p>

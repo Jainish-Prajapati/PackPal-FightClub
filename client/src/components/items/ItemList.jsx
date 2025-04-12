@@ -2,20 +2,23 @@ import React from 'react';
 import ItemStatusBadge from './ItemStatusBadge';
 import { BiPencil, BiTrash } from 'react-icons/bi';
 import { itemService } from '../../services/api';
+import { toast } from 'react-hot-toast';
 
-const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDeleteItem }) => {
+const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDeleteItem, isEventEnded = false }) => {
   const updateItemStatus = async (itemId, newStatus) => {
     try {
+      if (isEventEnded) {
+        toast.error("Cannot update items in an ended event");
+        return;
+      }
+      
       await itemService.updateItemStatus(itemId, newStatus);
       
-      // Since we don't have sockets now, we would need to refresh the data
-      // This could be handled by passing a callback to refresh the parent component
-      // or implementing a more sophisticated state management approach
-      // For now, we'll just show an alert
-      alert('Status updated successfully! Refresh the page to see changes.');
+      // Show success message
+      toast.success('Status updated successfully');
     } catch (error) {
       console.error('Error updating item status:', error);
-      alert('Failed to update status. Please try again.');
+      toast.error('Failed to update status');
     }
   };
 
@@ -52,9 +55,11 @@ const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDel
               <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-6 py-3 bg-gray-50 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
+              {!isEventEnded && isEditable && (
+                <th className="px-6 py-3 bg-gray-50 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -70,7 +75,7 @@ const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDel
                   {getAssignedToName(item.assignedToId)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  {(isEditable || item.assignedToId === currentUserId) ? (
+                  {(isEditable || item.assignedToId === currentUserId) && !isEventEnded ? (
                     <select
                       value={item.status}
                       onChange={(e) => updateItemStatus(item.id, e.target.value)}
@@ -85,8 +90,8 @@ const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDel
                     <ItemStatusBadge status={item.status} />
                   )}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  {isEditable && (
+                {!isEventEnded && isEditable && (
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end space-x-2">
                       <button 
                         className="text-indigo-600 hover:text-indigo-900"
@@ -103,8 +108,8 @@ const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDel
                         <BiTrash className="h-5 w-5" />
                       </button>
                     </div>
-                  )}
-                </td>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

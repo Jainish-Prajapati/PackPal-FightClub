@@ -102,10 +102,47 @@ export const authService = {
     api.put('/auth/me', userData),
 };
 
+// Utility for handling errors
+const handleApiError = (error, defaultMessage = 'Operation failed') => {
+  console.error('API Error:', error);
+  
+  let errorMessage = defaultMessage;
+  
+  if (error.response && error.response.data) {
+    if (error.response.data.message) {
+      errorMessage = error.response.data.message;
+    } else if (error.response.data.error) {
+      errorMessage = error.response.data.error;
+    }
+  } else if (error.message) {
+    errorMessage = error.message;
+  }
+  
+  return {
+    success: false,
+    message: errorMessage
+  };
+};
+
 // Event services
 export const eventService = {
-  getAllEvents: () => 
-    api.get('/events'),
+  getAllEvents: async () => {
+    try {
+      const response = await api.get('/events?status=active,planning');
+      return response;
+    } catch (error) {
+      return { data: handleApiError(error, 'Failed to fetch active events') };
+    }
+  },
+  
+  getCompletedEvents: async () => {
+    try {
+      const response = await api.get('/events?status=ended');
+      return response;
+    } catch (error) {
+      return { data: handleApiError(error, 'Failed to fetch completed events') };
+    }
+  },
   
   getEventById: (id) => {
     // Add retry logic for this specific endpoint
@@ -148,9 +185,21 @@ export const eventService = {
   updateMemberRole: (eventId, memberId, role) =>
     api.put(`/events/${eventId}/members/${memberId}/role`, { role }),
     
+  updateMemberName: (eventId, updateData) =>
+    api.put(`/events/${eventId}/members/update-name`, updateData),
+    
   inviteToEvent: (id, invites) => 
     api.post(`/events/${id}/invite`, { invites }),
-    
+  
+  updateEventStatus: async (id, status) => {
+    try {
+      const response = await api.put(`/events/${id}/status`, { status });
+      return response;
+    } catch (error) {
+      return { data: handleApiError(error, 'Failed to update event status') };
+    }
+  },
+  
   endEvent: (id) =>
     api.put(`/events/${id}/end`),
 };

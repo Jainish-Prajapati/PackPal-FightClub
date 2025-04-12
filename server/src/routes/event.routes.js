@@ -21,6 +21,9 @@ router.put('/:id', eventController.updateEvent);
 // Delete an event
 router.delete('/:id', eventController.deleteEvent);
 
+// Update event status
+router.put('/:id/status', eventController.updateEventStatus);
+
 // End/Close an event (owner only)
 router.put('/:id/end', eventController.endEvent);
 
@@ -32,5 +35,8 @@ router.delete('/:id/members/:memberId', eventController.removeMember);
 
 // Update event member role
 router.put('/:id/members/:memberId/role', eventController.updateMemberRole);
+
+// Update member name (owner or admin)
+router.put('/:id/members/update-name', eventController.updateMemberName);
 
 module.exports = router; 

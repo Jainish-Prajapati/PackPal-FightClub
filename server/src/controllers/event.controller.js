@@ -1,6 +1,6 @@
 const { db } = require('../db/index');
 const { events, users, items, eventMembers } = require('../db/schema');
-const { eq, and, or } = require('drizzle-orm');
+const { eq, and, or, inArray } = require('drizzle-orm');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
@@ -81,19 +81,36 @@ exports.createEvent = async (req, res) => {
  */
 exports.getMyEvents = async (req, res) => {
   try {
-    // Find all events owned by the user
-    const userEvents = await db.select({
+    // Check if status filter is provided
+    const statusFilter = req.query.status ? req.query.status.split(',') : null;
+    
+    // Build the query
+    let query = db.select({
       id: events.id,
       name: events.name,
       description: events.description,
       location: events.location,
       startDate: events.startDate,
       endDate: events.endDate,
+      status: events.status,
+      ownerId: events.ownerId,
       createdAt: events.createdAt,
       updatedAt: events.updatedAt
     })
     .from(events)
     .where(eq(events.ownerId, req.user.id));
+    
+    // Add status filter if provided
+    if (statusFilter) {
+      query = query.where(
+        statusFilter.length === 1
+          ? eq(events.status, statusFilter[0])
+          : inArray(events.status, statusFilter)
+      );
+    }
+    
+    // Execute the query
+    const userEvents = await query;
 
     return res.status(200).json({
       success: true,
@@ -164,6 +181,8 @@ exports.getEventById = async (req, res) => {
       role: eventMembers.role,
       inviteStatus: eventMembers.inviteStatus,
       inviteEmail: eventMembers.inviteEmail,
+      inviteFirstName: eventMembers.inviteFirstName,
+      inviteLastName: eventMembers.inviteLastName,
       createdAt: eventMembers.createdAt
     })
     .from(eventMembers)
@@ -189,14 +208,33 @@ exports.getEventById = async (req, res) => {
           });
         }
       } else if (member.inviteEmail) {
-        members.push({
-          ...member,
-          user: {
-            email: member.inviteEmail,
-            firstName: 'Invited',
-            lastName: 'User'
-          }
-        });
+        // Get user if they exist with this email
+        const userResults = await db.select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          email: users.email
+        })
+        .from(users)
+        .where(eq(users.email, member.inviteEmail));
+        
+        if (userResults.length) {
+          // User exists with this email
+          members.push({
+            ...member,
+            user: userResults[0]
+          });
+        } else {
+          // Use the invite first and last name if available
+          members.push({
+            ...member,
+            user: {
+              email: member.inviteEmail,
+              firstName: member.inviteFirstName && member.inviteFirstName.trim() !== '' ? member.inviteFirstName : 'Invited',
+              lastName: member.inviteLastName && member.inviteLastName.trim() !== '' ? member.inviteLastName : 'User'
+            }
+          });
+        }
       }
     }
 
@@ -452,7 +490,9 @@ exports.inviteToEvent = async (req, res) => {
 
     // Process each invite
     for (const invite of invites) {
-      const { email, role = 'member', firstName = 'New', lastName = 'User' } = invite;
+      const { email, role = 'member', firstName = '', lastName = '' } = invite;
+      
+      console.log('Invite data received:', { email, role, firstName, lastName });
 
       // Check if user with email exists
       const userResults = await db.select()
@@ -506,9 +546,9 @@ exports.inviteToEvent = async (req, res) => {
         try {
           const newUser = {
             id: crypto.randomUUID(),
-            firstName: firstName,
-            lastName: lastName,
-            email: email,
+            firstName,
+            lastName,
+            email,
             password: hashedPassword,
             role: 'member',
             isActive: true,
@@ -541,6 +581,8 @@ exports.inviteToEvent = async (req, res) => {
           inviteStatus: 'accepted',
           inviteToken: null,
           inviteEmail: email,
+          inviteFirstName: firstName,
+          inviteLastName: lastName,
           createdAt: new Date(),
           updatedAt: new Date()
         };
@@ -788,7 +830,15 @@ exports.endEvent = async (req, res) => {
     const updatedEventResults = await db.select()
       .from(events)
       .where(eq(events.id, eventId));
-      
+    
+    // Notify all members via socket (if available)
+    if (req.io) {
+      req.io.to(`event:${eventId}`).emit('event:ended', {
+        eventId,
+        message: `Event "${event.name}" has been ended by the owner.`
+      });
+    }
+    
     return res.status(200).json({
       success: true,
       message: 'Event ended successfully',
@@ -882,6 +932,210 @@ exports.updateMemberRole = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error updating member role',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Update event status
+ * @route PUT /api/events/:id/status
+ * @access Private (owner or admin only)
+ */
+exports.updateEventStatus = async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const { status } = req.body;
+    
+    // Validate status
+    const validStatuses = ['planning', 'active', 'packing', 'ended'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status provided'
+      });
+    }
+    
+    // Find event
+    const eventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+
+    if (!eventResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    const event = eventResults[0];
+
+    // Check if user is the owner or admin of this event
+    let hasPermission = false;
+
+    // Check if user is owner
+    if (event.ownerId === req.user.id) {
+      hasPermission = true;
+    } else {
+      // Check if user is an admin
+      const userMemberResults = await db.select()
+        .from(eventMembers)
+        .where(
+          and(
+            eq(eventMembers.eventId, eventId),
+            eq(eventMembers.userId, req.user.id),
+            eq(eventMembers.role, 'admin'),
+            eq(eventMembers.inviteStatus, 'accepted')
+          )
+        );
+      
+      hasPermission = userMemberResults.length > 0;
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to update this event status'
+      });
+    }
+    
+    // Special handling for ended status - only owner can end an event
+    if (status === 'ended' && event.ownerId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the event owner can end an event'
+      });
+    }
+    
+    // Update event status
+    await db.update(events)
+      .set({
+        status: status,
+        updatedAt: new Date()
+      })
+      .where(eq(events.id, eventId));
+      
+    // Get updated event
+    const updatedEventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Event status updated successfully',
+      event: updatedEventResults[0]
+    });
+  } catch (error) {
+    console.error('Update event status error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating event status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Update existing member's first and last name
+ * @route PUT /api/events/:id/members/update-name
+ * @access Private (owner or admin)
+ */
+exports.updateMemberName = async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const { email, firstName, lastName } = req.body;
+    
+    if (!email || !firstName || !lastName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email, firstName, and lastName'
+      });
+    }
+
+    // Find event
+    const eventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+
+    if (!eventResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    const event = eventResults[0];
+
+    // Check if user is the owner of the event or has an admin role
+    // First check if user is owner
+    const isOwner = event.ownerId === req.user.id;
+    
+    // If not owner, check if user is an admin
+    let isAdmin = false;
+    if (!isOwner) {
+      const memberResults = await db.select()
+        .from(eventMembers)
+        .where(
+          and(
+            eq(eventMembers.eventId, eventId),
+            eq(eventMembers.userId, req.user.id),
+            eq(eventMembers.role, 'admin'),
+            eq(eventMembers.inviteStatus, 'accepted')
+          )
+        );
+      
+      isAdmin = memberResults.length > 0;
+    }
+    
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to update member names'
+      });
+    }
+
+    // Find the member by email
+    const memberResults = await db.select()
+      .from(eventMembers)
+      .where(
+        and(
+          eq(eventMembers.eventId, eventId),
+          eq(eventMembers.inviteEmail, email)
+        )
+      );
+    
+    if (!memberResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member with that email not found'
+      });
+    }
+
+    // Update the member's name
+    await db.update(eventMembers)
+      .set({
+        inviteFirstName: firstName,
+        inviteLastName: lastName,
+        updatedAt: new Date()
+      })
+      .where(
+        and(
+          eq(eventMembers.eventId, eventId),
+          eq(eventMembers.inviteEmail, email)
+        )
+      );
+    
+    console.log(`Updated member ${email} with firstName=${firstName} and lastName=${lastName}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Member name updated successfully'
+    });
+  } catch (error) {
+    console.error('Update member name error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating member name',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

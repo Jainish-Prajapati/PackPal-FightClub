@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { eventService, itemService } from '../../services/api.js';
@@ -6,11 +6,14 @@ import ItemList from '../../components/items/ItemList';
 import MemberList from '../../components/members/MemberList';
 import ItemCategoryTabs from '../../components/items/ItemCategoryTabs';
 import EventProgressBar from '../../components/events/EventProgressBar';
+import { toast } from 'react-hot-toast';
+import { SidebarContext } from '../../components/layouts/Sidebar';
 
 const EventDetails = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { refreshSidebar } = useContext(SidebarContext) || { refreshSidebar: () => {} };
   
   const [event, setEvent] = useState(null);
   const [items, setItems] = useState([]);
@@ -113,6 +116,14 @@ const EventDetails = () => {
           // Handle members if available
           if (eventData.members && Array.isArray(eventData.members)) {
             console.log('Setting members:', eventData.members.length, 'members found');
+            console.log('Members data:', JSON.stringify(eventData.members.map(m => ({
+              id: m.id,
+              email: m.inviteEmail,
+              firstName: m.user?.firstName || 'Unknown',
+              lastName: m.user?.lastName || 'Unknown',
+              inviteFirstName: m.inviteFirstName,
+              inviteLastName: m.inviteLastName
+            }))));
             setMembers(eventData.members);
           } else {
             console.log('No members found in event data, using default');
@@ -216,9 +227,68 @@ const EventDetails = () => {
     fetchEventDetails();
   }, [fetchEventDetails]);
   
-  // Handle item creation
+  // Add status update effect
+  useEffect(() => {
+    const updateEventStatusBasedOnItems = async () => {
+      // Only run this if we have items and the event is not ended
+      if (!event || !items || !Array.isArray(items) || event.status === 'ended') {
+        return;
+      }
+      
+      // Calculate current status based on item completion
+      const calculateCurrentStatus = () => {
+        // If no items, it's still in planning
+        if (items.length === 0) {
+          return 'planning';
+        }
+        
+        // Calculate the percentage of packed items
+        const packedItems = items.filter(item => 
+          item.status === 'packed' || item.status === 'delivered'
+        ).length;
+        
+        const totalItems = items.length;
+        const packingPercentage = (packedItems / totalItems) * 100;
+        
+        // Determine status based on packing percentage
+        if (packingPercentage === 0) {
+          return 'planning';
+        } else if (packingPercentage < 50) {
+          return 'active';
+        } else if (packingPercentage < 100) {
+          return 'packing';
+        } else {
+          return 'packing'; // All packed but not marked as ended
+        }
+      };
+      
+      const currentStatus = calculateCurrentStatus();
+      
+      // Only update if the status is different and not ended
+      // (ended status should only be set manually)
+      if (currentStatus !== event.status && currentStatus !== 'ended') {
+        try {
+          await eventService.updateEventStatus(eventId, currentStatus);
+          console.log(`Updated event status to ${currentStatus}`);
+        } catch (error) {
+          console.error('Error updating event status:', error);
+        }
+      }
+    };
+    
+    updateEventStatusBasedOnItems();
+  }, [items, event, eventId]);
+  
+  // Handle adding a new item
   const handleAddItem = async (e) => {
     e.preventDefault();
+    
+    // Don't allow adding items if event is ended
+    if (event.status === 'ended') {
+      toast.error("Cannot add items to an ended event");
+      setShowAddItemModal(false);
+      return;
+    }
     
     try {
       const itemData = {
@@ -232,19 +302,21 @@ const EventDetails = () => {
       
       // In mock mode, just add locally
       if (isUsingMockData) {
-        const mockNewItem = {
+        const mockItem = {
           ...itemData,
-          id: 'mock-item-' + (items.length + 1)
+          id: 'mock-item-' + (items.length + 1),
+          createdAt: new Date().toISOString()
         };
-        setItems([...items, mockNewItem]);
+        setItems([...items, mockItem]);
         setShowAddItemModal(false);
         setNewItem({
           name: '',
           quantity: 1,
-          category: 'essentials',
+          category: categories[0]?.id || '',
           status: 'not_started',
           assignedToId: ''
         });
+        toast.success('Item added successfully');
         return;
       }
       
@@ -252,30 +324,38 @@ const EventDetails = () => {
       const response = await itemService.createItem(itemData);
       
       if (response.data && response.data.success) {
-        // Refresh the event details to show the new item
+        // Refresh item list
         fetchEventDetails();
+        toast.success('Item added successfully');
       } else {
         throw new Error(response.data?.message || 'Failed to add item');
       }
       
-      // Reset and close modal
+      // Reset form and close modal
       setShowAddItemModal(false);
       setNewItem({
         name: '',
         quantity: 1,
-        category: 'essentials',
+        category: categories[0]?.id || '',
         status: 'not_started',
         assignedToId: ''
       });
     } catch (err) {
       console.error('Error adding item:', err);
-      alert('Failed to add item. Please try again.');
+      toast.error(err.message || 'Failed to add item. Please try again.');
     }
   };
   
   // Handle member invitation
   const handleInviteMember = async (e) => {
     e.preventDefault();
+    
+    // Don't allow invites if event is ended
+    if (event.status === 'ended') {
+      toast.error("Cannot invite members to an ended event");
+      setShowInviteModal(false);
+      return;
+    }
     
     try {
       // In mock mode, just add locally
@@ -314,11 +394,11 @@ const EventDetails = () => {
         // Show success message with the invite information
         const result = response.data.results && response.data.results[0];
         if (result && result.status === 'invited' && result.tempPassword) {
-          alert(`Invitation sent to ${inviteEmail} successfully! A temporary password has been generated: ${result.tempPassword}`);
+          toast.success(`Invitation sent to ${inviteEmail} successfully! A temporary password has been generated: ${result.tempPassword}`);
         } else if (result && result.status === 'already_invited') {
-          alert(`${inviteEmail} has already been invited to this event.`);
+          toast.info(`${inviteEmail} has already been invited to this event.`);
         } else {
-          alert(`Invitation sent to ${inviteEmail} successfully!`);
+          toast.success(`Invitation sent to ${inviteEmail} successfully!`);
         }
         
         // Refresh the event details to show the new member
@@ -335,12 +415,44 @@ const EventDetails = () => {
       setInviteLastName('');
     } catch (err) {
       console.error('Error inviting member:', err);
-      alert('Failed to invite member. Please try again.');
+      toast.error(err.message || 'Failed to invite member. Please try again.');
+    }
+  };
+  
+  // Function to update an existing member's name
+  const updateExistingMemberName = async () => {
+    try {
+      if (!inviteEmail || !inviteFirstName || !inviteLastName) {
+        toast.error("Please fill in all fields");
+        return;
+      }
+      
+      const response = await eventService.updateMemberName(eventId, {
+        email: inviteEmail,
+        firstName: inviteFirstName,
+        lastName: inviteLastName
+      });
+      
+      if (response.data && response.data.success) {
+        toast.success(`Updated name for ${inviteEmail}`);
+        fetchEventDetails();
+      } else {
+        throw new Error(response.data?.message || "Failed to update member name");
+      }
+    } catch (err) {
+      console.error('Error updating member name:', err);
+      toast.error(err.message || "Failed to update member name");
     }
   };
   
   // Handle item editing
   const handleEditItem = (item) => {
+    // Don't allow edits if event is ended
+    if (event.status === 'ended') {
+      toast.error("Cannot edit items in an ended event");
+      return;
+    }
+    
     setEditingItem({
       id: item.id,
       name: item.name,
@@ -354,6 +466,12 @@ const EventDetails = () => {
 
   // Handle item deletion
   const handleDeleteItem = (item) => {
+    // Don't allow deletes if event is ended
+    if (event.status === 'ended') {
+      toast.error("Cannot delete items from an ended event");
+      return;
+    }
+    
     setItemToDelete(item);
     setShowDeleteItemModal(true);
   };
@@ -380,6 +498,7 @@ const EventDetails = () => {
         setItems(updatedItems);
         setShowEditItemModal(false);
         setEditingItem(null);
+        toast.success('Item updated successfully');
         return;
       }
       
@@ -389,6 +508,7 @@ const EventDetails = () => {
       if (response.data && response.data.success) {
         // Refresh the event details to show updated item
         fetchEventDetails();
+        toast.success('Item updated successfully');
       } else {
         throw new Error(response.data?.message || 'Failed to update item');
       }
@@ -398,7 +518,7 @@ const EventDetails = () => {
       setEditingItem(null);
     } catch (err) {
       console.error('Error updating item:', err);
-      alert('Failed to update item. Please try again.');
+      toast.error(err.message || 'Failed to update item. Please try again.');
     }
   };
 
@@ -411,6 +531,7 @@ const EventDetails = () => {
         setItems(filteredItems);
         setShowDeleteItemModal(false);
         setItemToDelete(null);
+        toast.success('Item deleted successfully');
         return;
       }
       
@@ -420,6 +541,7 @@ const EventDetails = () => {
       if (response.data && response.data.success) {
         // Refresh the event details to reflect the deletion
         fetchEventDetails();
+        toast.success('Item deleted successfully');
       } else {
         throw new Error(response.data?.message || 'Failed to delete item');
       }
@@ -429,12 +551,18 @@ const EventDetails = () => {
       setItemToDelete(null);
     } catch (err) {
       console.error('Error deleting item:', err);
-      alert('Failed to delete item. Please try again.');
+      toast.error(err.message || 'Failed to delete item. Please try again.');
     }
   };
   
   // Edit event button handler
   const handleEditEvent = () => {
+    // Don't allow edits if event is ended
+    if (event.status === 'ended') {
+      toast.error("Cannot edit an ended event");
+      return;
+    }
+    
     setEditedEvent({
       name: event.name || '',
       description: event.description || '',
@@ -466,11 +594,13 @@ const EventDetails = () => {
           destination: editedEvent.destination
         });
         setShowEditEventModal(false);
+        setIsLoading(false);
+        toast.success('Event updated successfully');
         return;
       }
       
       // With real API
-      const response = await eventService.updateEvent(eventId, {
+      const eventData = {
         name: editedEvent.name,
         description: editedEvent.description,
         startDate: editedEvent.startDate,
@@ -478,11 +608,14 @@ const EventDetails = () => {
         location: editedEvent.location,
         source: editedEvent.source,
         destination: editedEvent.destination
-      });
+      };
+      
+      const response = await eventService.updateEvent(eventId, eventData);
       
       if (response.data && response.data.success) {
         // Refresh event details
         fetchEventDetails();
+        toast.success('Event updated successfully');
       } else {
         throw new Error(response.data?.message || 'Failed to update event');
       }
@@ -490,7 +623,7 @@ const EventDetails = () => {
       setShowEditEventModal(false);
     } catch (err) {
       console.error('Error updating event:', err);
-      alert('Failed to update event. Please try again.');
+      toast.error(err.message || 'Failed to update event. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -507,22 +640,46 @@ const EventDetails = () => {
     }
   };
   
-  // Calculate progress
-  const calculateProgress = () => {
-    if (!items || !Array.isArray(items) || items.length === 0) return 0;
+  const calculateEventStatus = () => {
+    if (event.status === 'ended') {
+      return 'ended';
+    }
     
-    try {
-      const packedItems = items.filter(item => 
-        item && item.status && ['packed', 'delivered'].includes(item.status)).length;
-      return Math.round((packedItems / items.length) * 100);
-    } catch (err) {
-      return 0;
+    // If event status is already set to something other than 'planning' or 'active', use that
+    if (event.status && !['planning', 'active'].includes(event.status)) {
+      return event.status;
+    }
+    
+    // If no items, it's still in planning
+    if (items.length === 0) {
+      return 'planning';
+    }
+    
+    // Calculate the percentage of packed items
+    const packedItems = items.filter(item => 
+      item.status === 'packed' || item.status === 'delivered'
+    ).length;
+    
+    const totalItems = items.length;
+    const packingPercentage = (packedItems / totalItems) * 100;
+    
+    // Determine status based on packing percentage
+    if (packingPercentage === 0) {
+      return 'planning';
+    } else if (packingPercentage < 50) {
+      return 'active';
+    } else if (packingPercentage < 100) {
+      return 'packing';
+    } else {
+      return 'packing'; // All packed but not marked as ended
     }
   };
   
   // Check if user can edit
   const isEditable = () => {
     if (!event || !currentUser) return false;
+    // Don't allow edits if event is ended
+    if (event.status === 'ended') return false;
     return event.ownerId === currentUser.id || 
            members.some(m => m.userId === currentUser.id && ['owner', 'admin'].includes(m.role));
   };
@@ -545,6 +702,16 @@ const EventDetails = () => {
           status: 'ended'
         });
         setShowEndEventModal(false);
+        toast.success('Event has been ended successfully');
+        
+        // Show confirmation message about completed events
+        setTimeout(() => {
+          toast.info('You can find this event in the "Completed Events" section');
+        }, 1500);
+        
+        // Refresh sidebar to show completed events link
+        refreshSidebar();
+        
         return;
       }
       
@@ -552,9 +719,25 @@ const EventDetails = () => {
       const response = await eventService.endEvent(eventId);
       
       if (response.data && response.data.success) {
-        // Refresh event details
+        // Update local state immediately to avoid waiting for refetch
+        setEvent({
+          ...event,
+          status: 'ended'
+        });
+        
+        // Show success message
+        toast.success('Event has been ended successfully');
+        
+        // Show confirmation message about completed events
+        setTimeout(() => {
+          toast.info('You can find this event in the "Completed Events" section');
+        }, 1500);
+        
+        // Refresh sidebar to show completed events link
+        refreshSidebar();
+        
+        // Refresh event details to get the latest data
         fetchEventDetails();
-        alert('Event has been ended successfully');
       } else {
         throw new Error(response.data?.message || 'Failed to end event');
       }
@@ -562,7 +745,7 @@ const EventDetails = () => {
       setShowEndEventModal(false);
     } catch (err) {
       console.error('Error ending event:', err);
-      alert('Failed to end event. Please try again.');
+      toast.error(err.message || 'Failed to end event. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -627,7 +810,14 @@ const EventDetails = () => {
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold">{event.name || 'Unnamed Event'}</h1>
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold">{event.name || 'Unnamed Event'}</h1>
+              {event.status === 'ended' && (
+                <span className="ml-3 px-2 py-1 text-xs font-medium bg-gray-200 text-gray-800 rounded-full">
+                  Ended
+                </span>
+              )}
+            </div>
             <div className="text-gray-500 mb-2">
               {formatDate(event.startDate)} - {formatDate(event.endDate)}
               {event.location && ` • ${event.location}`}
@@ -645,27 +835,36 @@ const EventDetails = () => {
           </div>
           
           <div className="mt-4 md:mt-0 flex space-x-3">
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="px-4 py-2 bg-white border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-            >
-              Invite Members
-            </button>
-            {isEditable() && (
-              <button 
-                onClick={handleEditEvent} 
-                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-              >
-                Edit Event
-              </button>
+            {event.status !== 'ended' && (
+              <>
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Invite Members
+                </button>
+                {isEditable() && (
+                  <button 
+                    onClick={handleEditEvent} 
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                  >
+                    Edit Event
+                  </button>
+                )}
+                {isOwner() && (
+                  <button 
+                    onClick={() => setShowEndEventModal(true)}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                  >
+                    End Event
+                  </button>
+                )}
+              </>
             )}
-            {isOwner() && (
-              <button 
-                onClick={() => setShowEndEventModal(true)}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-              >
-                End Event
-              </button>
+            {event.status === 'ended' && isOwner() && (
+              <div className="text-sm text-gray-500 italic">
+                This event has been ended and cannot be modified.
+              </div>
             )}
           </div>
         </div>
@@ -677,9 +876,23 @@ const EventDetails = () => {
         )}
       </div>
       
+      {/* Status display */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 className="text-lg font-medium mb-4">Overall Progress</h2>
-        <EventProgressBar progress={calculateProgress()} />
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-medium">Event Status</h2>
+          <div className="text-sm text-gray-500">
+            {items.length > 0 ? (
+              <span>
+                {items.filter(item => 
+                  item.status === 'packed' || item.status === 'delivered'
+                ).length} of {items.length} items packed
+              </span>
+            ) : (
+              <span>No items added yet</span>
+            )}
+          </div>
+        </div>
+        <EventProgressBar status={calculateEventStatus()} />
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -687,7 +900,7 @@ const EventDetails = () => {
           <div className="bg-white shadow rounded-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-medium">Packing Items</h2>
-              {isEditable() && (
+              {isEditable() && event.status !== 'ended' && (
                 <button
                   onClick={() => setShowAddItemModal(true)}
                   className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700"
@@ -703,7 +916,7 @@ const EventDetails = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
                 <p className="text-gray-500 mb-4">No items added yet.</p>
-                {isEditable() && (
+                {isEditable() && event.status !== 'ended' && (
                   <button
                     onClick={() => setShowAddItemModal(true)}
                     className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
@@ -729,6 +942,7 @@ const EventDetails = () => {
                   currentUserId={currentUser?.id}
                   onEditItem={handleEditItem}
                   onDeleteItem={handleDeleteItem}
+                  isEventEnded={event.status === 'ended'}
                 />
               </>
             )}
@@ -930,6 +1144,13 @@ const EventDetails = () => {
                     className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                   >
                     Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={updateExistingMemberName}
+                    className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                  >
+                    Update Existing Member
                   </button>
                   <button
                     type="submit"

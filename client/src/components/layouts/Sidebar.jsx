@@ -1,10 +1,49 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { BiX, BiHome, BiCalendarEvent, BiUser, BiLogOut } from 'react-icons/bi';
+import { BiX, BiHome, BiCalendarEvent, BiUser, BiLogOut, BiCheck } from 'react-icons/bi';
+import { eventService } from '../../services/api';
+
+// Create a context to manage sidebar updates
+export const SidebarContext = createContext();
+
+export const SidebarProvider = ({ children }) => {
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  
+  const refreshSidebar = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+  
+  return (
+    <SidebarContext.Provider value={{ refreshSidebar, refreshTrigger }}>
+      {children}
+    </SidebarContext.Provider>
+  );
+};
 
 const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
   const { currentUser, logout } = useAuth();
+  const [hasCompletedEvents, setHasCompletedEvents] = useState(false);
+  const { refreshTrigger } = useContext(SidebarContext) || { refreshTrigger: 0 };
+  const location = useLocation();
+  
+  // Check if user has any completed events
+  useEffect(() => {
+    const checkCompletedEvents = async () => {
+      try {
+        const response = await eventService.getCompletedEvents();
+        if (response.data && response.data.success && response.data.events) {
+          setHasCompletedEvents(response.data.events.length > 0);
+        }
+      } catch (error) {
+        console.error("Error checking completed events:", error);
+      }
+    };
+    
+    if (currentUser) {
+      checkCompletedEvents();
+    }
+  }, [currentUser, refreshTrigger, location.pathname]); // Re-check when location or refreshTrigger changes
 
   // Navigation items for the sidebar
   const Navigation = () => {
@@ -23,6 +62,22 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
           <BiHome className="mr-3 h-6 w-6" />
           Dashboard
         </NavLink>
+        
+        {hasCompletedEvents && (
+          <NavLink
+            to="/completed-events"
+            className={({ isActive }) =>
+              `flex items-center px-2 py-2 text-sm font-medium rounded-md ${
+                isActive
+                  ? 'bg-indigo-800 text-white'
+                  : 'text-indigo-100 hover:bg-indigo-600'
+              }`
+            }
+          >
+            <BiCheck className="mr-3 h-6 w-6" />
+            Completed Events
+          </NavLink>
+        )}
         
         <NavLink
           to="/profile"
@@ -111,8 +166,28 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }) => {
   );
 };
 
-// Add components to be used in MainLayout
+// Update the exported Navigation component
 Sidebar.Navigation = () => {
+  const [hasCompletedEvents, setHasCompletedEvents] = useState(false);
+  const { refreshTrigger } = useContext(SidebarContext) || { refreshTrigger: 0 };
+  const location = useLocation();
+  
+  // Check if user has any completed events
+  useEffect(() => {
+    const checkCompletedEvents = async () => {
+      try {
+        const response = await eventService.getCompletedEvents();
+        if (response.data && response.data.success && response.data.events) {
+          setHasCompletedEvents(response.data.events.length > 0);
+        }
+      } catch (error) {
+        console.error("Error checking completed events:", error);
+      }
+    };
+    
+    checkCompletedEvents();
+  }, [refreshTrigger, location.pathname]); // Re-check when location or refreshTrigger changes
+  
   return (
     <>
       <NavLink
@@ -128,6 +203,22 @@ Sidebar.Navigation = () => {
         <BiHome className="mr-3 h-6 w-6" />
         Dashboard
       </NavLink>
+      
+      {hasCompletedEvents && (
+        <NavLink
+          to="/completed-events"
+          className={({ isActive }) =>
+            `flex items-center px-2 py-2 text-sm font-medium rounded-md ${
+              isActive
+                ? 'bg-indigo-800 text-white'
+                : 'text-indigo-100 hover:bg-indigo-600'
+            }`
+          }
+        >
+          <BiCheck className="mr-3 h-6 w-6" />
+          Completed Events
+        </NavLink>
+      )}
       
       <NavLink
         to="/profile"

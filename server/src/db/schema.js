@@ -47,6 +47,8 @@ const eventMembers = pgTable('event_members', {
   inviteStatus: inviteStatusEnum('invite_status').default('pending'),
   inviteToken: varchar('invite_token'),
   inviteEmail: varchar('invite_email'),
+  inviteFirstName: varchar('invite_first_name'),
+  inviteLastName: varchar('invite_last_name'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()
 });

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
+import { Toaster } from 'react-hot-toast';
+import { SidebarProvider } from './components/layouts/Sidebar';
 
 // Layout Components
 import MainLayout from './components/layouts/MainLayout';
@@ -11,6 +13,7 @@ import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import EventDetails from './pages/events/EventDetails';
 import CreateEvent from './pages/events/CreateEvent';
+import CompletedEvents from './pages/events/CompletedEvents';
 import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
 import InvitePage from './pages/invite/InvitePage';
@@ -41,27 +44,56 @@ const PrivateRoute = ({ children }) => {
 
 function App() {
   return (
-    <Routes>
-      {/* Public Routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/invite/:token" element={<InvitePage />} />
-      
-      {/* Protected Routes */}
-      <Route path="/" element={
-        <PrivateRoute>
-          <MainLayout />
-        </PrivateRoute>
-      }>
-        <Route index element={<Dashboard />} />
-        <Route path="events/create" element={<CreateEvent />} />
-        <Route path="events/:eventId" element={<EventDetails />} />
-        <Route path="profile" element={<Profile />} />
-      </Route>
-      
-      {/* 404 Route */}
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <SidebarProvider>
+      <>
+        <Toaster 
+          position="top-right"
+          toastOptions={{
+            duration: 3000,
+            style: {
+              background: '#ffffff',
+              color: '#333333',
+              boxShadow: '0 3px 10px rgba(0, 0, 0, 0.1)',
+              padding: '16px',
+              borderRadius: '8px',
+            },
+            success: {
+              style: {
+                border: '1px solid #10B981',
+              },
+            },
+            error: {
+              style: {
+                border: '1px solid #EF4444',
+              },
+              duration: 4000,
+            },
+          }}
+        />
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/invite/:token" element={<InvitePage />} />
+          
+          {/* Protected Routes */}
+          <Route path="/" element={
+            <PrivateRoute>
+              <MainLayout />
+            </PrivateRoute>
+          }>
+            <Route index element={<Dashboard />} />
+            <Route path="events/create" element={<CreateEvent />} />
+            <Route path="events/:eventId" element={<EventDetails />} />
+            <Route path="completed-events" element={<CompletedEvents />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
+          
+          {/* 404 Route */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </>
+    </SidebarProvider>
   );
 }
 

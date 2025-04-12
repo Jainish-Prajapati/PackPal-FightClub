@@ -1,32 +1,77 @@
 import React from 'react';
 
-const EventProgressBar = ({ progress }) => {
-  // Function to determine the color based on progress
-  const getProgressColor = () => {
-    if (progress < 30) return 'bg-red-500';
-    if (progress < 70) return 'bg-yellow-500';
-    return 'bg-green-500';
+const EventProgressBar = ({ status = 'planning' }) => {
+  // Define the possible statuses and their order
+  const statuses = ['planning', 'active', 'packing', 'ended'];
+  
+  // Find the current status index
+  const currentIndex = statuses.indexOf(status);
+  
+  // Format status for display
+  const formatStatus = (status) => {
+    switch(status) {
+      case 'planning': return 'Planning';
+      case 'active': return 'Active';
+      case 'packing': return 'Packing';
+      case 'ended': return 'Delivered';
+      default: return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+  };
+  
+  // Get appropriate icon for each status
+  const getStatusIcon = (statusItem, index, currentIndex) => {
+    if (index <= currentIndex) {
+      // For completed steps, show checkmark
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      );
+    }
+    
+    // Show numbered icons for future steps
+    return <span>{index + 1}</span>;
   };
 
   return (
-    <div className="relative pt-1">
-      <div className="flex mb-2 items-center justify-between">
-        <div>
-          <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-indigo-600 bg-indigo-200">
-            Packing Progress
-          </span>
-        </div>
-        <div className="text-right">
-          <span className="text-xs font-semibold inline-block text-indigo-600">
-            {progress}%
-          </span>
-        </div>
-      </div>
-      <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-indigo-200">
-        <div
-          style={{ width: `${progress}%` }}
-          className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center ${getProgressColor()} transition-all duration-500`}
+    <div className="w-full py-4">
+      {/* Progress bar container */}
+      <div className="relative pb-12">
+        {/* Progress bar line */}
+        <div className="absolute top-7 left-0 right-0 h-1 bg-gray-200"></div>
+        
+        {/* Completed progress line */}
+        <div 
+          className="absolute top-7 left-0 h-1 bg-teal-500 transition-all duration-500"
+          style={{ width: `${Math.max(0, (currentIndex / (statuses.length - 1)) * 100)}%` }}
         ></div>
+        
+        {/* Status points */}
+        <div className="relative flex justify-between">
+          {statuses.map((statusItem, index) => (
+            <div key={statusItem} className="flex flex-col items-center">
+              {/* Status circle */}
+              <div 
+                className={`rounded-full h-14 w-14 flex items-center justify-center z-10 border-2 shadow-md ${
+                  index < currentIndex 
+                    ? 'bg-teal-500 border-teal-600 text-white' 
+                    : index === currentIndex
+                    ? 'bg-teal-500 border-teal-600 text-white animate-pulse'
+                    : 'bg-gray-200 border-gray-300 text-gray-500'
+                }`}
+              >
+                {getStatusIcon(statusItem, index, currentIndex)}
+              </div>
+              
+              {/* Status label */}
+              <div className={`mt-4 text-sm font-medium ${
+                index <= currentIndex ? 'text-teal-600 font-semibold' : 'text-gray-500'
+              }`}>
+                {formatStatus(statusItem)}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
