@@ -29,6 +29,13 @@
       "when": 1744600000000,
       "tag": "0004_add_status_to_items",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1744700000000,
+      "tag": "0005_add_event_members",
+      "breakpoints": true
     }
   ]
 }

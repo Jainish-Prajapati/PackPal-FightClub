@@ -281,6 +281,16 @@ const EventDetails = () => {
       const response = await eventService.inviteToEvent(eventId, [inviteData]);
       
       if (response.data && response.data.success) {
+        // Show success message with the invite information
+        const result = response.data.results && response.data.results[0];
+        if (result && result.status === 'invited' && result.tempPassword) {
+          alert(`Invitation sent to ${inviteEmail} successfully! A temporary password has been generated: ${result.tempPassword}`);
+        } else if (result && result.status === 'already_invited') {
+          alert(`${inviteEmail} has already been invited to this event.`);
+        } else {
+          alert(`Invitation sent to ${inviteEmail} successfully!`);
+        }
+        
         // Refresh the event details to show the new member
         fetchEventDetails();
       } else {

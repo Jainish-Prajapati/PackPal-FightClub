@@ -3,6 +3,9 @@ const { pgTable, uuid, varchar, text, timestamp, boolean, foreignKey, pgEnum } =
 // Role enum
 const roleEnum = pgEnum('role', ['owner', 'admin', 'member', 'viewer']);
 
+// Invite status enum
+const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'declined']);
+
 // User table
 const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -34,6 +37,19 @@ const events = pgTable('events', {
   updatedAt: timestamp('updated_at').defaultNow()
 });
 
+// Event members table
+const eventMembers = pgTable('event_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventId: uuid('event_id').references(() => events.id).notNull(),
+  userId: uuid('user_id').references(() => users.id),
+  role: roleEnum('role').default('member'),
+  inviteStatus: inviteStatusEnum('invite_status').default('pending'),
+  inviteToken: varchar('invite_token'),
+  inviteEmail: varchar('invite_email'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow()
+});
+
 // Item table
 const items = pgTable('items', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -55,5 +71,7 @@ module.exports = {
   users,
   events,
   items,
-  roleEnum
+  eventMembers,
+  roleEnum,
+  inviteStatusEnum
 };

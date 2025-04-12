@@ -71,11 +71,13 @@ app.use(cors({
 const authRoutes = require('./routes/auth.routes');
 const eventRoutes = require('./routes/event.routes');
 const itemRoutes = require('./routes/item.routes');
+const inviteRoutes = require('./routes/invite.routes');
 const testRoutes = require('./routes/test.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/items', itemRoutes);
+app.use('/api/invites', inviteRoutes);
 app.use('/api/test', testRoutes);
 
 // Default route

@@ -4,6 +4,9 @@ const generateToken = require('../utils/generateToken');
 const bcrypt = require('bcrypt');
 const { eq } = require('drizzle-orm');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { eventMembers, events } = require('../db/schema');
 
 /**
  * Register a new user
@@ -289,4 +292,208 @@ exports.healthCheck = (req, res) => {
     message: 'Authentication service is up and running',
     timestamp: new Date()
   });
+};
+
+/**
+ * Accept event invitation
+ * @route POST /api/auth/accept-invite/:token
+ * @access Public
+ */
+exports.acceptInvite = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+    
+    console.log(`Processing invitation acceptance for token: ${token}`);
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid invitation token'
+      });
+    }
+    
+    // Find the invitation
+    const inviteResults = await db.select()
+      .from(eventMembers)
+      .where(eq(eventMembers.inviteToken, token));
+    
+    if (!inviteResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found or already accepted'
+      });
+    }
+    
+    const invitation = inviteResults[0];
+    
+    // Make sure invitation is still pending
+    if (invitation.inviteStatus !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invitation has already been processed'
+      });
+    }
+    
+    // If the invitation has a user ID, just update the status
+    if (invitation.userId) {
+      // Update invitation status
+      await db.update(eventMembers)
+        .set({
+          inviteStatus: 'accepted',
+          inviteToken: null,
+          updatedAt: new Date()
+        })
+        .where(eq(eventMembers.id, invitation.id));
+      
+      // Get the user info
+      const userResults = await db.select()
+        .from(users)
+        .where(eq(users.id, invitation.userId));
+      
+      if (!userResults.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+      
+      const user = userResults[0];
+      
+      // Get event info
+      const eventResults = await db.select()
+        .from(events)
+        .where(eq(events.id, invitation.eventId));
+      
+      const event = eventResults.length ? eventResults[0] : null;
+      
+      // Generate token
+      const token = jwt.sign(
+        { id: user.id },
+        process.env.JWT_SECRET || 'your-jwt-secret',
+        { expiresIn: '30d' }
+      );
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Invitation accepted successfully',
+        token,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          role: user.role
+        },
+        event: event ? {
+          id: event.id,
+          name: event.name
+        } : null
+      });
+    }
+    
+    // If there's no user ID but there's an email, we need to create a user
+    if (!invitation.userId && invitation.inviteEmail) {
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password is required to complete registration'
+        });
+      }
+      
+      // Check if a user with this email already exists
+      const userResults = await db.select()
+        .from(users)
+        .where(eq(users.email, invitation.inviteEmail));
+      
+      let user;
+      
+      if (userResults.length) {
+        // User exists, update the invitation with the user ID
+        user = userResults[0];
+        
+        await db.update(eventMembers)
+          .set({
+            userId: user.id,
+            inviteStatus: 'accepted',
+            inviteToken: null,
+            updatedAt: new Date()
+          })
+          .where(eq(eventMembers.id, invitation.id));
+      } else {
+        // Create a new user
+        const bcrypt = require('bcrypt');
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        
+        const newUser = {
+          id: crypto.randomUUID(),
+          firstName: req.body.firstName || 'New',
+          lastName: req.body.lastName || 'User',
+          email: invitation.inviteEmail,
+          password: hashedPassword,
+          role: 'member',
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        
+        await db.insert(users).values(newUser);
+        user = newUser;
+        
+        // Update the invitation with the new user ID
+        await db.update(eventMembers)
+          .set({
+            userId: user.id,
+            inviteStatus: 'accepted',
+            inviteToken: null,
+            updatedAt: new Date()
+          })
+          .where(eq(eventMembers.id, invitation.id));
+      }
+      
+      // Get event info
+      const eventResults = await db.select()
+        .from(events)
+        .where(eq(events.id, invitation.eventId));
+      
+      const event = eventResults.length ? eventResults[0] : null;
+      
+      // Generate token
+      const token = jwt.sign(
+        { id: user.id },
+        process.env.JWT_SECRET || 'your-jwt-secret',
+        { expiresIn: '30d' }
+      );
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Invitation accepted and registration completed',
+        token,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          role: user.role
+        },
+        event: event ? {
+          id: event.id,
+          name: event.name
+        } : null
+      });
+    }
+    
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid invitation data'
+    });
+  } catch (error) {
+    console.error('Accept invite error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error accepting invitation',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 }; 

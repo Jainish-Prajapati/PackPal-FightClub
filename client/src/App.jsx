@@ -13,6 +13,7 @@ import EventDetails from './pages/events/EventDetails';
 import CreateEvent from './pages/events/CreateEvent';
 import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
+import InvitePage from './pages/invite/InvitePage';
 
 // Route Guards
 const PrivateRoute = ({ children }) => {
@@ -44,6 +45,7 @@ function App() {
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/invite/:token" element={<InvitePage />} />
       
       {/* Protected Routes */}
       <Route path="/" element={
