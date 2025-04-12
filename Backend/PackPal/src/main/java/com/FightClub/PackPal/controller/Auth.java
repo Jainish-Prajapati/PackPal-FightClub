@@ -4,10 +4,7 @@ import com.FightClub.PackPal.model.user;
 import com.FightClub.PackPal.repository.userRepo;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/auth")
@@ -62,4 +59,5 @@ public class Auth {
 
         return "Signup successful";
     }
+
 }
