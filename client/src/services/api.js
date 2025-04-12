@@ -107,8 +107,31 @@ export const eventService = {
   getAllEvents: () => 
     api.get('/events'),
   
-  getEventById: (id) => 
-    api.get(`/events/${id}`),
+  getEventById: (id) => {
+    // Add retry logic for this specific endpoint
+    const maxRetries = 2;
+    let currentRetry = 0;
+    
+    const attempt = async () => {
+      try {
+        console.log(`Attempting to fetch event ${id} (Attempt ${currentRetry + 1}/${maxRetries + 1})`);
+        return await api.get(`/events/${id}`);
+      } catch (error) {
+        console.error(`Error fetching event ${id}:`, error);
+        currentRetry++;
+        
+        if (currentRetry <= maxRetries) {
+          console.log(`Retrying... (${currentRetry}/${maxRetries})`);
+          // Wait 1 second before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return attempt();
+        }
+        throw error;
+      }
+    };
+    
+    return attempt();
+  },
   
   createEvent: (eventData) => 
     api.post('/events', eventData),
@@ -118,6 +141,9 @@ export const eventService = {
   
   deleteEvent: (id) => 
     api.delete(`/events/${id}`),
+    
+  inviteToEvent: (id, invites) => 
+    api.post(`/events/${id}/invite`, { invites }),
 };
 
 // Item services
@@ -139,4 +165,112 @@ export const itemService = {
   
   deleteItem: (id) => 
     api.delete(`/items/${id}`),
+};
+
+// Location services
+export const locationService = {
+  // Get a list of Indian cities - main implementation using local data
+  getIndianCities: (query = '') => {
+    if (!query || query.length < 2) return Promise.resolve([]);
+    
+    // Comprehensive list of major Indian cities
+    const indianCities = [
+      "Mumbai", "Delhi", "Bangalore", "Hyderabad", "Chennai", "Kolkata", "Ahmedabad", 
+      "Pune", "Jaipur", "Lucknow", "Kanpur", "Nagpur", "Indore", "Thane", "Bhopal", 
+      "Visakhapatnam", "Patna", "Vadodara", "Ghaziabad", "Ludhiana", "Agra", "Nashik", 
+      "Faridabad", "Meerut", "Rajkot", "Varanasi", "Srinagar", "Aurangabad", "Dhanbad", 
+      "Amritsar", "Navi Mumbai", "Allahabad", "Ranchi", "Haora", "Coimbatore", "Jabalpur",
+      "Gwalior", "Vijayawada", "Jodhpur", "Madurai", "Raipur", "Kota", "Chandigarh", 
+      "Guwahati", "Solapur", "Hubli", "Dharwad", "Mysore", "Tiruchirappalli", "Bareilly", 
+      "Aligarh", "Moradabad", "Jalandhar", "Bhubaneswar", "Salem", "Warangal", "Mira-Bhayandar", 
+      "Jalgaon", "Guntur", "Thiruvananthapuram", "Bhiwandi", "Saharanpur", "Gorakhpur", 
+      "Bikaner", "Amravati", "Noida", "Jamshedpur", "Bhilai", "Cuttack", "Firozabad", 
+      "Kochi", "Nellore", "Bhavnagar", "Dehradun", "Durgapur", "Asansol", "Nanded", 
+      "Kolhapur", "Ajmer", "Akola", "Gulbarga", "Jamnagar", "Ujjain", "Loni", "Siliguri", 
+      "Jhansi", "Ulhasnagar", "Jammu", "Sangli-Miraj", "Kupwad", "Mangalore", "Erode", 
+      "Belgaum", "Ambattur", "Tirunelveli", "Malegaon", "Gaya", "Udaipur", 
+      "Maheshtala", "Tirupur", "Davanagere",
+      // Additional tier 2 and tier 3 cities
+      "Shimla", "Gangtok", "Darjeeling", "Ooty", "Rishikesh", "Haridwar", "Pushkar",
+      "Puri", "Hampi", "Panaji", "Shillong", "Imphal", "Aizawl", "Itanagar", "Kohima",
+      "Port Blair", "Silvassa", "Daman", "Diu", "Kavaratti", "Puducherry", "Agartala"
+    ];
+    
+    // Filter cities based on the query (case-insensitive)
+    const filteredCities = indianCities.filter(city => 
+      city.toLowerCase().includes(query.toLowerCase())
+    ).slice(0, 10); // Limit to 10 results for performance
+    
+    // Try to fetch from an alternative API for more options, but don't wait for it
+    if (filteredCities.length < 5) {
+      this.fetchFromAlternativeApi(query).then(apiCities => {
+        // This will be used for future searches if the API responds
+        if (apiCities.length > 0) {
+          // Cache the results in localStorage for future use
+          try {
+            const existingCache = JSON.parse(localStorage.getItem('citiesCache') || '{}');
+            existingCache[query.toLowerCase()] = apiCities;
+            localStorage.setItem('citiesCache', JSON.stringify(existingCache));
+          } catch (e) {
+            console.error('Error caching cities:', e);
+          }
+        }
+      });
+    }
+    
+    // Check if we have cached results for this query
+    try {
+      const cachedResults = JSON.parse(localStorage.getItem('citiesCache') || '{}')[query.toLowerCase()];
+      if (cachedResults && cachedResults.length > 0) {
+        // Combine with filtered cities, remove duplicates, and limit to 10
+        const combinedResults = [...new Set([...cachedResults, ...filteredCities])].slice(0, 10);
+        return Promise.resolve(combinedResults);
+      }
+    } catch (e) {
+      console.error('Error reading cached cities:', e);
+    }
+    
+    return Promise.resolve(filteredCities);
+  },
+  
+  // Try to fetch from a third-party API that provides Indian cities
+  fetchFromAlternativeApi: (query = '') => {
+    if (!query || query.length < 2) return Promise.resolve([]);
+    
+    // This could be replaced with any CORS-friendly API for Indian cities
+    // Using a mock implementation that returns a promise with a delay
+    return new Promise(resolve => {
+      setTimeout(() => {
+        // Additional cities not in our main list
+        const additionalCities = [
+          "Alappuzha", "Alibaug", "Almora", "Badrinath", "Barog", "Bhandardara", 
+          "Bharatpur", "Bhimtal", "Bhopal", "Bhubaneswar", "Bodh Gaya", "Chail", 
+          "Chamba", "Cherrapunji", "Chikmagalur", "Chitkul", "Coorg", "Coonoor", 
+          "Dalhousie", "Dehradun", "Dharamshala", "Dibrugarh", "Digha", "Dispur", 
+          "Dwaraka", "Faridabad", "Fatehpur Sikri", "Ganjam", "Ganpatipule", "Goa", 
+          "Gokarna", "Gulmarg", "Gwalior", "Halebid", "Hampi", "Hassan", "Hospet", 
+          "Igatpuri", "Jaisalmer", "Jorhat", "Kalimpong", "Kanchipuram", "Kanha", 
+          "Kannur", "Kanpur", "Kanyakumari", "Kasauli", "Kedarnath", "Khandala", 
+          "Khajuraho", "Kochi", "Kodaikanal", "Kolad", "Kotagiri", "Kottayam", 
+          "Kovalam", "Kumbakonam", "Lachung", "Leh", "Lonavala", "Lucknow", 
+          "Madikeri", "Madurai", "Mahabaleshwar", "Mahabalipuram", "Malvan", 
+          "Manali", "Mandarmani", "Matheran", "Mukteshwar", "Mussoorie", "Mysore", 
+          "Nainital", "Nashik", "Nellore", "Ooty", "Orchha", "Pahalgam", "Panchgani", 
+          "Patnitop", "Pelling", "Puri", "Pushkar", "Raipur", "Rajahmundry", 
+          "Rajkot", "Ranikhet", "Sangli", "Saputara", "Shillong", "Shimla", 
+          "Shirdi", "Siliguri", "Somnath", "Srinagar", "Tawang", "Tirupati", 
+          "Udaipur", "Ujjain", "Varanasi", "Varkala", "Vijayawada", "Visakhapatnam", 
+          "Wayanad", "Yercaud", "Ziro"
+        ];
+        
+        const filteredAdditional = additionalCities.filter(city => 
+          city.toLowerCase().includes(query.toLowerCase()) &&
+          !city.toLowerCase().endsWith('pur') && // Avoid too many similar names
+          query.length > 2  // Only add these cities for more specific searches
+        ).slice(0, 5);
+        
+        resolve(filteredAdditional);
+      }, 500); // Small delay to simulate API call
+    });
+  }
 }; 

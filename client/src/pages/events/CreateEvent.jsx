@@ -1,29 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
-import axios from 'axios';
+import { eventService, locationService } from '../../services/api.js';
 
 const CreateEvent = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  
+  // For searchable dropdowns
+  const [sourceSearch, setSourceSearch] = useState('');
+  const [destinationSearch, setDestinationSearch] = useState('');
+  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
+  const [showDestinationDropdown, setShowDestinationDropdown] = useState(false);
+  
+  // State for API-fetched cities
+  const [sourceCities, setSourceCities] = useState([]);
+  const [destinationCities, setDestinationCities] = useState([]);
+  const [isFetchingSourceCities, setIsFetchingSourceCities] = useState(false);
+  const [isFetchingDestinationCities, setIsFetchingDestinationCities] = useState(false);
+  
+  // Get today's date for date input min attribute
+  const today = new Date().toISOString().split('T')[0];
 
   const formik = useFormik({
     initialValues: {
       name: '',
       startDate: '',
       endDate: '',
-      location: '',
+      source: '',
+      destination: '',
       purpose: '',
     },
     validationSchema: Yup.object({
       name: Yup.string().required('Required'),
-      startDate: Yup.date().required('Required'),
+      startDate: Yup.date()
+        .min(today, 'Start date cannot be in the past')
+        .required('Required'),
       endDate: Yup.date()
         .min(Yup.ref('startDate'), 'End date must be after start date')
         .required('Required'),
-      location: Yup.string().required('Required'),
+      source: Yup.string().required('Source city is required'),
+      destination: Yup.string().required('Destination city is required'),
       purpose: Yup.string().required('Required'),
     }),
     onSubmit: async (values) => {
@@ -31,12 +50,27 @@ const CreateEvent = () => {
       setError(null);
 
       try {
-        const response = await axios.post('/api/events', values, {
-          withCredentials: true
+        // Format location as "Source to Destination"
+        const location = `${values.source} to ${values.destination}`;
+        
+        console.log("Creating new event:", {...values, location});
+        const response = await eventService.createEvent({
+          name: values.name,
+          description: values.purpose,
+          startDate: values.startDate,
+          endDate: values.endDate,
+          location: location,
+          source: values.source,
+          destination: values.destination
         });
         
+        console.log("Event creation response:", response.data);
+        
         if (response.data.success) {
-          navigate(`/events/${response.data.data.id}`);
+          console.log("Event created successfully, navigating to event page");
+          navigate(`/events/${response.data.event.id}`);
+        } else {
+          setError(response.data.message || 'Failed to create event');
         }
       } catch (err) {
         console.error('Error creating event:', err);
@@ -46,6 +80,77 @@ const CreateEvent = () => {
       }
     },
   });
+
+  // Handle clicking outside the dropdowns to close them
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showSourceDropdown && !event.target.closest('.source-dropdown-container')) {
+        setShowSourceDropdown(false);
+      }
+      if (showDestinationDropdown && !event.target.closest('.destination-dropdown-container')) {
+        setShowDestinationDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showSourceDropdown, showDestinationDropdown]);
+
+  // Fetch source cities when sourceSearch changes
+  useEffect(() => {
+    const fetchSourceCities = async () => {
+      if (sourceSearch.length < 2) {
+        setSourceCities([]);
+        return;
+      }
+      
+      setIsFetchingSourceCities(true);
+      try {
+        const cities = await locationService.getIndianCities(sourceSearch);
+        setSourceCities(cities);
+      } catch (error) {
+        console.error('Error fetching source cities:', error);
+        // Use a basic fallback if all else fails
+        setSourceCities(['Mumbai', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai'].filter(
+          city => city.toLowerCase().includes(sourceSearch.toLowerCase())
+        ));
+      } finally {
+        setIsFetchingSourceCities(false);
+      }
+    };
+    
+    const timer = setTimeout(fetchSourceCities, 300);
+    return () => clearTimeout(timer);
+  }, [sourceSearch]);
+  
+  // Fetch destination cities when destinationSearch changes
+  useEffect(() => {
+    const fetchDestinationCities = async () => {
+      if (destinationSearch.length < 2) {
+        setDestinationCities([]);
+        return;
+      }
+      
+      setIsFetchingDestinationCities(true);
+      try {
+        const cities = await locationService.getIndianCities(destinationSearch);
+        setDestinationCities(cities);
+      } catch (error) {
+        console.error('Error fetching destination cities:', error);
+        // Use a basic fallback if all else fails
+        setDestinationCities(['Mumbai', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai'].filter(
+          city => city.toLowerCase().includes(destinationSearch.toLowerCase())
+        ));
+      } finally {
+        setIsFetchingDestinationCities(false);
+      }
+    };
+    
+    const timer = setTimeout(fetchDestinationCities, 300);
+    return () => clearTimeout(timer);
+  }, [destinationSearch]);
 
   return (
     <div>
@@ -86,6 +191,7 @@ const CreateEvent = () => {
                 id="startDate"
                 name="startDate"
                 type="date"
+                min={today}
                 onChange={formik.handleChange}
                 onBlur={formik.handleBlur}
                 value={formik.values.startDate}
@@ -104,6 +210,7 @@ const CreateEvent = () => {
                 id="endDate"
                 name="endDate"
                 type="date"
+                min={formik.values.startDate || today}
                 onChange={formik.handleChange}
                 onBlur={formik.handleBlur}
                 value={formik.values.endDate}
@@ -115,22 +222,112 @@ const CreateEvent = () => {
             </div>
           </div>
           
-          <div>
-            <label htmlFor="location" className="block text-sm font-medium text-gray-700">
-              Location
-            </label>
-            <input
-              id="location"
-              name="location"
-              type="text"
-              onChange={formik.handleChange}
-              onBlur={formik.handleBlur}
-              value={formik.values.location}
-              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            {formik.touched.location && formik.errors.location ? (
-              <div className="text-red-500 text-sm mt-1">{formik.errors.location}</div>
-            ) : null}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="relative source-dropdown-container">
+              <label htmlFor="source" className="block text-sm font-medium text-gray-700">
+                Source City
+              </label>
+              <input
+                id="source"
+                name="source"
+                type="text"
+                autoComplete="off"
+                placeholder="Search and select a city"
+                value={sourceSearch}
+                onChange={(e) => {
+                  setSourceSearch(e.target.value);
+                  setShowSourceDropdown(true);
+                }}
+                onFocus={() => setShowSourceDropdown(true)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              {showSourceDropdown && (
+                <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base overflow-auto">
+                  {isFetchingSourceCities ? (
+                    <div className="px-4 py-2 text-gray-500">Loading cities...</div>
+                  ) : sourceCities.length > 0 ? (
+                    sourceCities.map((city) => (
+                      <div
+                        key={city}
+                        className="cursor-pointer px-4 py-2 hover:bg-indigo-50"
+                        onClick={() => {
+                          setSourceSearch(city);
+                          formik.setFieldValue('source', city);
+                          setShowSourceDropdown(false);
+                        }}
+                      >
+                        {city}
+                      </div>
+                    ))
+                  ) : sourceSearch.length > 0 ? (
+                    <div className="px-4 py-2 text-gray-500">No cities found</div>
+                  ) : (
+                    <div className="px-4 py-2 text-gray-500">Type at least 2 characters to search</div>
+                  )}
+                </div>
+              )}
+              <input
+                type="hidden"
+                name="source"
+                value={formik.values.source}
+              />
+              {formik.touched.source && formik.errors.source ? (
+                <div className="text-red-500 text-sm mt-1">{formik.errors.source}</div>
+              ) : null}
+            </div>
+            
+            <div className="relative destination-dropdown-container">
+              <label htmlFor="destination" className="block text-sm font-medium text-gray-700">
+                Destination City
+              </label>
+              <input
+                id="destination"
+                name="destination"
+                type="text"
+                autoComplete="off"
+                placeholder="Search and select a city"
+                value={destinationSearch}
+                onChange={(e) => {
+                  setDestinationSearch(e.target.value);
+                  setShowDestinationDropdown(true);
+                }}
+                onFocus={() => setShowDestinationDropdown(true)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              {showDestinationDropdown && (
+                <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base overflow-auto">
+                  {isFetchingDestinationCities ? (
+                    <div className="px-4 py-2 text-gray-500">Loading cities...</div>
+                  ) : destinationCities.length > 0 ? (
+                    destinationCities.map((city) => (
+                      <div
+                        key={city}
+                        className="cursor-pointer px-4 py-2 hover:bg-indigo-50"
+                        onClick={() => {
+                          setDestinationSearch(city);
+                          formik.setFieldValue('destination', city);
+                          setShowDestinationDropdown(false);
+                        }}
+                      >
+                        {city}
+                      </div>
+                    ))
+                  ) : destinationSearch.length > 0 ? (
+                    <div className="px-4 py-2 text-gray-500">No cities found</div>
+                  ) : (
+                    <div className="px-4 py-2 text-gray-500">Type at least 2 characters to search</div>
+                  )}
+                </div>
+              )}
+              <input
+                type="hidden"
+                name="destination"
+                value={formik.values.destination}
+              />
+              {formik.touched.destination && formik.errors.destination ? (
+                <div className="text-red-500 text-sm mt-1">{formik.errors.destination}</div>
+              ) : null}
+            </div>
           </div>
           
           <div>

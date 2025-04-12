@@ -3,7 +3,7 @@ import ItemStatusBadge from './ItemStatusBadge';
 import { BiPencil, BiTrash } from 'react-icons/bi';
 import { itemService } from '../../services/api';
 
-const ItemList = ({ items, members, isEditable, currentUserId }) => {
+const ItemList = ({ items, members, isEditable, currentUserId, onEditItem, onDeleteItem }) => {
   const updateItemStatus = async (itemId, newStatus) => {
     try {
       await itemService.updateItemStatus(itemId, newStatus);
@@ -88,10 +88,18 @@ const ItemList = ({ items, members, isEditable, currentUserId }) => {
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   {isEditable && (
                     <div className="flex justify-end space-x-2">
-                      <button className="text-indigo-600 hover:text-indigo-900">
+                      <button 
+                        className="text-indigo-600 hover:text-indigo-900"
+                        onClick={() => onEditItem && onEditItem(item)}
+                        aria-label="Edit item"
+                      >
                         <BiPencil className="h-5 w-5" />
                       </button>
-                      <button className="text-red-600 hover:text-red-900">
+                      <button 
+                        className="text-red-600 hover:text-red-900"
+                        onClick={() => onDeleteItem && onDeleteItem(item)}
+                        aria-label="Delete item"
+                      >
                         <BiTrash className="h-5 w-5" />
                       </button>
                     </div>
