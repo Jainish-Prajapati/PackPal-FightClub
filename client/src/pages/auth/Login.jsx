@@ -1,14 +1,23 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 
 const Login = () => {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState(null);
+  const navigate = useNavigate();
+  
+  // If already authenticated, redirect to dashboard
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log("User already authenticated, redirecting to dashboard");
+      navigate('/');
+    }
+  }, [isAuthenticated, navigate]);
 
   const formik = useFormik({
     initialValues: {
@@ -31,13 +40,13 @@ const Login = () => {
         if (!result.success) {
           console.log("Login failed with message:", result.message);
           setError(result.message || 'Login failed. Please try again.');
+          setIsLoading(false);
         } else {
-          console.log("Login successful, should redirect soon");
+          console.log("Login successful, redirection should happen automatically");
         }
       } catch (err) {
         console.error('Login submission error:', err);
         setError('An unexpected error occurred during login. Please try again.');
-      } finally {
         setIsLoading(false);
       }
     },

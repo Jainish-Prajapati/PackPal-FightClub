@@ -22,8 +22,8 @@ const Dashboard = () => {
         console.log("Events response:", response.data);
         
         if (response.data.success) {
-          setEvents(response.data.data);
-          console.log("Events loaded successfully:", response.data.data.length, "events");
+          setEvents(response.data.events);
+          console.log("Events loaded successfully:", response.data.events.length, "events");
         } else {
           console.error("Events API returned error:", response.data.message);
           setError(response.data.message || 'Failed to load events');

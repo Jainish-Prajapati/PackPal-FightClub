@@ -76,18 +76,26 @@ export const AuthProvider = ({ children }) => {
         const token = response.data.data.token;
         localStorage.setItem('token', token);
         
+        // Update state first
         setCurrentUser(response.data.data.user);
         setIsAuthenticated(true);
+        setIsLoading(false);
         
         // Use React navigation instead of window.location
         console.log("Redirecting to dashboard...");
-        navigate('/');
+        
+        // Add a slight delay to ensure state is updated before navigation
+        setTimeout(() => {
+          navigate('/');
+        }, 100);
         
         return { success: true };
       }
+      setIsLoading(false);
       return { success: false, message: response.data.message || 'Login failed' };
     } catch (error) {
       console.error('Login failed:', error);
+      setIsLoading(false);
       
       // Check if there's an actual response with data
       if (error.response && error.response.data) {
@@ -102,8 +110,6 @@ export const AuthProvider = ({ children }) => {
         success: false,
         message: 'Unable to connect to the server. Please check your internet connection.'
       };
-    } finally {
-      setIsLoading(false);
     }
   };
 
