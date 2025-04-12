@@ -8,7 +8,7 @@ const nodemailer = require('nodemailer');
 /**
  * Create a new event
  * @route POST /api/events
- * @access Private
+ * @access Private (any authenticated user with admin role in other events)
  */
 exports.createEvent = async (req, res) => {
   try {
@@ -36,12 +36,28 @@ exports.createEvent = async (req, res) => {
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
       ownerId: req.user.id,
+      status: 'planning',
       createdAt: new Date(),
       updatedAt: new Date()
     };
     
     await db.insert(events).values(newEvent);
     console.log('Event created successfully with ID:', newEvent.id);
+
+    // Add the creator as an owner member
+    const ownerMembership = {
+      id: crypto.randomUUID(),
+      eventId: newEvent.id,
+      userId: req.user.id,
+      role: 'owner',
+      inviteStatus: 'accepted',
+      inviteToken: null,
+      inviteEmail: req.user.email,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    await db.insert(eventMembers).values(ownerMembership);
 
     return res.status(201).json({
       success: true,
@@ -141,11 +157,55 @@ exports.getEventById = async (req, res) => {
       .from(items)
       .where(eq(items.eventId, eventId));
 
+    // Get event members
+    const memberResults = await db.select({
+      id: eventMembers.id,
+      userId: eventMembers.userId,
+      role: eventMembers.role,
+      inviteStatus: eventMembers.inviteStatus,
+      inviteEmail: eventMembers.inviteEmail,
+      createdAt: eventMembers.createdAt
+    })
+    .from(eventMembers)
+    .where(eq(eventMembers.eventId, eventId));
+    
+    // Get full user details for each member
+    const members = [];
+    for (const member of memberResults) {
+      if (member.userId) {
+        const userResults = await db.select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          email: users.email
+        })
+        .from(users)
+        .where(eq(users.id, member.userId));
+        
+        if (userResults.length) {
+          members.push({
+            ...member,
+            user: userResults[0]
+          });
+        }
+      } else if (member.inviteEmail) {
+        members.push({
+          ...member,
+          user: {
+            email: member.inviteEmail,
+            firstName: 'Invited',
+            lastName: 'User'
+          }
+        });
+      }
+    }
+
     // Combine data
     const eventData = {
       ...event,
       owner,
-      items: eventItems
+      items: eventItems,
+      members: members
     };
 
     return res.status(200).json({
@@ -392,7 +452,7 @@ exports.inviteToEvent = async (req, res) => {
 
     // Process each invite
     for (const invite of invites) {
-      const { email, role = 'member' } = invite;
+      const { email, role = 'member', firstName = 'New', lastName = 'User' } = invite;
 
       // Check if user with email exists
       const userResults = await db.select()
@@ -427,8 +487,6 @@ exports.inviteToEvent = async (req, res) => {
         continue;
       }
 
-      // Create invite token (secure random token)
-      const inviteToken = crypto.randomBytes(32).toString('hex');
       // Generate a temporary password for new users
       const tempPassword = crypto.randomBytes(8).toString('hex');
 
@@ -448,8 +506,8 @@ exports.inviteToEvent = async (req, res) => {
         try {
           const newUser = {
             id: crypto.randomUUID(),
-            firstName: 'New',
-            lastName: 'User',
+            firstName: firstName,
+            lastName: lastName,
             email: email,
             password: hashedPassword,
             role: 'member',
@@ -480,15 +538,15 @@ exports.inviteToEvent = async (req, res) => {
           eventId: eventId,
           userId: userId,
           role: role,
-          inviteStatus: 'pending',
-          inviteToken: inviteToken,
+          inviteStatus: 'accepted',
+          inviteToken: null,
           inviteEmail: email,
           createdAt: new Date(),
           updatedAt: new Date()
         };
         
         await db.insert(eventMembers).values(membership);
-        console.log(`Created event membership for ${email}`);
+        console.log(`Created event membership for ${email} with accepted status`);
       } catch (membershipError) {
         console.error(`Failed to create membership for ${email}:`, membershipError);
         results.push({
@@ -503,7 +561,6 @@ exports.inviteToEvent = async (req, res) => {
       if (transporter) {
         try {
           const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-          const acceptUrl = `${frontendUrl}/invite/${inviteToken}`;
           
           // Prepare email content
           const emailContent = `
@@ -517,9 +574,8 @@ exports.inviteToEvent = async (req, res) => {
             <p>Temporary Password: ${tempPassword}</p>
             <p>Please change your password after logging in for the first time.</p>
             ` : ''}
-            <p>Click the button below to accept the invitation:</p>
-            <a href="${acceptUrl}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
-            <p>Or copy and paste this link in your browser: ${acceptUrl}</p>
+            <p>To access this event, please login at: ${frontendUrl}</p>
+            <p>Your account has been automatically added to the event.</p>
           `;
           
           const mailOptions = {
@@ -586,6 +642,246 @@ exports.inviteToEvent = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error inviting users',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Remove a member from an event
+ * @route DELETE /api/events/:id/members/:memberId
+ * @access Private (owner or admin)
+ */
+exports.removeMember = async (req, res) => {
+  try {
+    const { id: eventId, memberId } = req.params;
+    
+    // Find event
+    const eventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+
+    if (!eventResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    const event = eventResults[0];
+
+    // Check if user is the owner of the event
+    const isOwner = event.ownerId === req.user.id;
+    
+    // If not owner, check if user is an admin
+    let isAdmin = false;
+    if (!isOwner) {
+      const memberResults = await db.select()
+        .from(eventMembers)
+        .where(
+          and(
+            eq(eventMembers.eventId, eventId),
+            eq(eventMembers.userId, req.user.id),
+            eq(eventMembers.role, 'admin'),
+            eq(eventMembers.inviteStatus, 'accepted')
+          )
+        );
+      
+      isAdmin = memberResults.length > 0;
+    }
+    
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to remove members from this event'
+      });
+    }
+    
+    // Find the member to be removed
+    const memberToRemoveResults = await db.select()
+      .from(eventMembers)
+      .where(eq(eventMembers.id, memberId));
+    
+    if (!memberToRemoveResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found'
+      });
+    }
+    
+    const memberToRemove = memberToRemoveResults[0];
+    
+    // Don't allow removing the owner
+    if (memberToRemove.userId === event.ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot remove the event owner'
+      });
+    }
+    
+    // Delete the member
+    await db.delete(eventMembers)
+      .where(eq(eventMembers.id, memberId));
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Member removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove member error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error removing member',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * End/Close an event
+ * @route PUT /api/events/:id/end
+ * @access Private (owner only)
+ */
+exports.endEvent = async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    
+    // Find event
+    const eventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+
+    if (!eventResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    const event = eventResults[0];
+
+    // Check if user is the owner of this event
+    if (event.ownerId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to end this event'
+      });
+    }
+    
+    // Check if event is already ended
+    if (event.status === 'ended') {
+      return res.status(400).json({
+        success: false,
+        message: 'Event has already been ended'
+      });
+    }
+    
+    // Update event status to ended
+    await db.update(events)
+      .set({
+        status: 'ended',
+        updatedAt: new Date()
+      })
+      .where(eq(events.id, eventId));
+      
+    // Get updated event
+    const updatedEventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+      
+    return res.status(200).json({
+      success: true,
+      message: 'Event ended successfully',
+      event: updatedEventResults[0]
+    });
+  } catch (error) {
+    console.error('End event error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error ending event',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Update a member's role in an event
+ * @route PUT /api/events/:id/members/:memberId/role
+ * @access Private (owner only)
+ */
+exports.updateMemberRole = async (req, res) => {
+  try {
+    const { id: eventId, memberId } = req.params;
+    const { role } = req.body;
+
+    if (!role || !['admin', 'member', 'viewer'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role provided'
+      });
+    }
+    
+    // Find event
+    const eventResults = await db.select()
+      .from(events)
+      .where(eq(events.id, eventId));
+
+    if (!eventResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event not found'
+      });
+    }
+
+    const event = eventResults[0];
+
+    // Check if user is the owner of the event
+    if (event.ownerId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the event owner can update member roles'
+      });
+    }
+    
+    // Find the member to be updated
+    const memberToUpdateResults = await db.select()
+      .from(eventMembers)
+      .where(eq(eventMembers.id, memberId));
+    
+    if (!memberToUpdateResults.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found'
+      });
+    }
+    
+    const memberToUpdate = memberToUpdateResults[0];
+    
+    // Don't allow changing the role of the event owner
+    if (memberToUpdate.userId === event.ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot change the role of the event owner'
+      });
+    }
+    
+    // Update the member's role
+    await db.update(eventMembers)
+      .set({
+        role: role,
+        updatedAt: new Date()
+      })
+      .where(eq(eventMembers.id, memberId));
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Member role updated successfully'
+    });
+  } catch (error) {
+    console.error('Update member role error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating member role',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

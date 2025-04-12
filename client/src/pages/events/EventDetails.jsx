@@ -34,6 +34,8 @@ const EventDetails = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
   
   // For editing items
   const [showEditItemModal, setShowEditItemModal] = useState(false);
@@ -46,6 +48,9 @@ const EventDetails = () => {
   // For edit event modal
   const [showEditEventModal, setShowEditEventModal] = useState(false);
   const [editedEvent, setEditedEvent] = useState(null);
+  
+  // For event end confirmation
+  const [showEndEventModal, setShowEndEventModal] = useState(false);
   
   // Fetch event details
   const fetchEventDetails = useCallback(async () => {
@@ -103,6 +108,25 @@ const EventDetails = () => {
               console.error('Error fetching items separately:', itemsErr);
               setItems([]);
             }
+          }
+          
+          // Handle members if available
+          if (eventData.members && Array.isArray(eventData.members)) {
+            console.log('Setting members:', eventData.members.length, 'members found');
+            setMembers(eventData.members);
+          } else {
+            console.log('No members found in event data, using default');
+            // Set default with just the current user as owner
+            setMembers([{
+              userId: currentUser?.id || 'unknown',
+              role: 'owner',
+              user: {
+                id: currentUser?.id || 'unknown',
+                firstName: currentUser?.firstName || 'User',
+                lastName: currentUser?.lastName || '',
+                email: currentUser?.email || 'user@example.com'
+              }
+            }]);
           }
           
           setIsUsingMockData(false);
@@ -169,18 +193,20 @@ const EventDetails = () => {
       // Default active category
       setActiveCategory(defaultCategories[0].id);
       
-      // Default members
-      const defaultMembers = [{
-        userId: currentUser?.id || 'unknown',
-        role: 'owner',
-        user: {
-          id: currentUser?.id || 'unknown',
-          firstName: currentUser?.firstName || 'User',
-          lastName: currentUser?.lastName || '',
-          email: currentUser?.email || 'user@example.com'
-        }
-      }];
-      setMembers(defaultMembers);
+      // Default members - only set if using mock data
+      if (isUsingMockData) {
+        const defaultMembers = [{
+          userId: currentUser?.id || 'unknown',
+          role: 'owner',
+          user: {
+            id: currentUser?.id || 'unknown',
+            firstName: currentUser?.firstName || 'User',
+            lastName: currentUser?.lastName || '',
+            email: currentUser?.email || 'user@example.com'
+          }
+        }];
+        setMembers(defaultMembers);
+      }
       
       setIsLoading(false);
     }
@@ -259,8 +285,8 @@ const EventDetails = () => {
           role: inviteRole,
           user: {
             id: 'mock-user-' + (members.length + 1),
-            firstName: 'Invited',
-            lastName: 'User',
+            firstName: inviteFirstName,
+            lastName: inviteLastName,
             email: inviteEmail
           }
         };
@@ -268,12 +294,16 @@ const EventDetails = () => {
         setShowInviteModal(false);
         setInviteEmail('');
         setInviteRole('member');
+        setInviteFirstName('');
+        setInviteLastName('');
         return;
       }
       
       // With real API
       const inviteData = {
         email: inviteEmail,
+        firstName: inviteFirstName,
+        lastName: inviteLastName,
         role: inviteRole,
         eventId: eventId
       };
@@ -301,6 +331,8 @@ const EventDetails = () => {
       setShowInviteModal(false);
       setInviteEmail('');
       setInviteRole('member');
+      setInviteFirstName('');
+      setInviteLastName('');
     } catch (err) {
       console.error('Error inviting member:', err);
       alert('Failed to invite member. Please try again.');
@@ -495,6 +527,47 @@ const EventDetails = () => {
            members.some(m => m.userId === currentUser.id && ['owner', 'admin'].includes(m.role));
   };
   
+  // Check if user is event owner
+  const isOwner = () => {
+    if (!event || !currentUser) return false;
+    return event.ownerId === currentUser.id;
+  };
+  
+  // Handle ending the event
+  const handleEndEvent = async () => {
+    try {
+      setIsLoading(true);
+      
+      // In mock mode, just update locally
+      if (isUsingMockData) {
+        setEvent({
+          ...event,
+          status: 'ended'
+        });
+        setShowEndEventModal(false);
+        return;
+      }
+      
+      // With real API
+      const response = await eventService.endEvent(eventId);
+      
+      if (response.data && response.data.success) {
+        // Refresh event details
+        fetchEventDetails();
+        alert('Event has been ended successfully');
+      } else {
+        throw new Error(response.data?.message || 'Failed to end event');
+      }
+      
+      setShowEndEventModal(false);
+    } catch (err) {
+      console.error('Error ending event:', err);
+      alert('Failed to end event. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   if (isLoading) {
     return (
       <div className="flex justify-center items-center py-12">
@@ -586,6 +659,14 @@ const EventDetails = () => {
                 Edit Event
               </button>
             )}
+            {isOwner() && (
+              <button 
+                onClick={() => setShowEndEventModal(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              >
+                End Event
+              </button>
+            )}
           </div>
         </div>
         
@@ -672,6 +753,8 @@ const EventDetails = () => {
               members={members} 
               currentUserId={currentUser?.id}
               isOwner={true}
+              eventId={eventId}
+              onMemberRemoved={fetchEventDetails}
             />
           </div>
         </div>
@@ -798,6 +881,31 @@ const EventDetails = () => {
                       className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                       required
                     />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="invite-firstName" className="block text-sm font-medium text-gray-700">First Name</label>
+                      <input
+                        type="text"
+                        id="invite-firstName"
+                        value={inviteFirstName}
+                        onChange={(e) => setInviteFirstName(e.target.value)}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="invite-lastName" className="block text-sm font-medium text-gray-700">Last Name</label>
+                      <input
+                        type="text"
+                        id="invite-lastName"
+                        value={inviteLastName}
+                        onChange={(e) => setInviteLastName(e.target.value)}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        required
+                      />
+                    </div>
                   </div>
                   
                   <div>
@@ -1082,6 +1190,38 @@ const EventDetails = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* End Event Confirmation Modal */}
+      {showEndEventModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">End Event</h3>
+              
+              <p className="text-gray-500 mb-6">
+                Are you sure you want to end this event? This will mark the event as completed and notify all members. This action cannot be undone.
+              </p>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEndEventModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEndEvent}
+                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                  End Event
+                </button>
+              </div>
             </div>
           </div>
         </div>

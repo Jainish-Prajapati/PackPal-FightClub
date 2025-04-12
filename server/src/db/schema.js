@@ -32,6 +32,7 @@ const events = pgTable('events', {
   destination: varchar('destination'),
   startDate: timestamp('start_date'),
   endDate: timestamp('end_date'),
+  status: varchar('status').default('active'),
   ownerId: uuid('owner_id').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow()

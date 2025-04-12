@@ -142,8 +142,17 @@ export const eventService = {
   deleteEvent: (id) => 
     api.delete(`/events/${id}`),
     
+  removeMember: (eventId, memberId) =>
+    api.delete(`/events/${eventId}/members/${memberId}`),
+    
+  updateMemberRole: (eventId, memberId, role) =>
+    api.put(`/events/${eventId}/members/${memberId}/role`, { role }),
+    
   inviteToEvent: (id, invites) => 
     api.post(`/events/${id}/invite`, { invites }),
+    
+  endEvent: (id) =>
+    api.put(`/events/${id}/end`),
 };
 
 // Item services

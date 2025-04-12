@@ -1,7 +1,11 @@
-import React from 'react';
-import { BiCrown } from 'react-icons/bi';
+import React, { useState } from 'react';
+import { BiCrown, BiX, BiUserPlus } from 'react-icons/bi';
+import { eventService } from '../../services/api.js';
 
-const MemberList = ({ members, currentUserId, isOwner }) => {
+const MemberList = ({ members, currentUserId, isOwner, eventId, onMemberRemoved }) => {
+  const [removingMemberId, setRemovingMemberId] = useState(null);
+  const [promotingMemberId, setPromotingMemberId] = useState(null);
+
   // Sort members by role importance
   const sortedMembers = [...members].sort((a, b) => {
     const roleOrder = { owner: 0, admin: 1, member: 2, viewer: 3 };
@@ -21,6 +25,57 @@ const MemberList = ({ members, currentUserId, isOwner }) => {
       default:
         return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const handleRemoveMember = async (memberId) => {
+    try {
+      setRemovingMemberId(memberId);
+      const response = await eventService.removeMember(eventId, memberId);
+      if (response.data && response.data.success) {
+        alert('Member removed successfully');
+        // Call the callback if provided to refresh the members list
+        if (onMemberRemoved) {
+          onMemberRemoved();
+        }
+      }
+    } catch (error) {
+      console.error('Error removing member:', error);
+      alert('Failed to remove member: ' + (error.response?.data?.message || 'Unknown error'));
+    } finally {
+      setRemovingMemberId(null);
+    }
+  };
+  
+  const handlePromoteToAdmin = async (memberId) => {
+    try {
+      setPromotingMemberId(memberId);
+      // We need to create this endpoint on the server
+      const response = await eventService.updateMemberRole(eventId, memberId, 'admin');
+      if (response.data && response.data.success) {
+        alert('Member promoted to admin successfully');
+        // Call the callback if provided to refresh the members list
+        if (onMemberRemoved) {
+          onMemberRemoved();
+        }
+      }
+    } catch (error) {
+      console.error('Error promoting member:', error);
+      alert('Failed to promote member: ' + (error.response?.data?.message || 'Unknown error'));
+    } finally {
+      setPromotingMemberId(null);
+    }
+  };
+
+  // Check if user can remove members (owner or admin)
+  const canRemoveMembers = () => {
+    const currentUserMember = members.find(m => m.userId === currentUserId);
+    return currentUserMember && (currentUserMember.role === 'owner' || currentUserMember.role === 'admin');
+  };
+  
+  // Check if user is the owner (only owner can promote to admin)
+  const isEventOwner = () => {
+    const currentUserMember = members.find(m => m.userId === currentUserId);
+    return currentUserMember && currentUserMember.role === 'owner';
   };
 
   return (
@@ -51,10 +106,50 @@ const MemberList = ({ members, currentUserId, isOwner }) => {
               </p>
               <p className="text-sm text-gray-500 truncate">{member.user.email}</p>
             </div>
-            <div>
+            <div className="flex items-center space-x-2">
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRoleBadgeClass(member.role)}`}>
                 {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
               </span>
+              
+              {/* Promote to admin button - shown only if user is owner and target is a regular member */}
+              {isEventOwner() && member.role === 'member' && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to promote ${member.user.firstName} ${member.user.lastName} to admin?`)) {
+                      handlePromoteToAdmin(member.id);
+                    }
+                  }}
+                  disabled={promotingMemberId === member.id}
+                  className="text-indigo-500 hover:text-indigo-700 focus:outline-none"
+                  title="Promote to admin"
+                >
+                  {promotingMemberId === member.id ? (
+                    <span className="text-xs">Promoting...</span>
+                  ) : (
+                    <BiUserPlus className="h-5 w-5" />
+                  )}
+                </button>
+              )}
+              
+              {/* Remove member button - shown only if user can remove members and target is not owner */}
+              {canRemoveMembers() && member.role !== 'owner' && member.userId !== currentUserId && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to remove ${member.user.firstName} ${member.user.lastName} from this event?`)) {
+                      handleRemoveMember(member.id);
+                    }
+                  }}
+                  disabled={removingMemberId === member.id}
+                  className="text-red-500 hover:text-red-700 focus:outline-none"
+                  title="Remove member"
+                >
+                  {removingMemberId === member.id ? (
+                    <span className="text-xs">Removing...</span>
+                  ) : (
+                    <BiX className="h-5 w-5" />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </li>
